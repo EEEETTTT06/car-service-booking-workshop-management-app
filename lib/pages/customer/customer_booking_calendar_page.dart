@@ -36,11 +36,11 @@ class _CustomerBookingCalendarPageState
     loadCalendarData();
 
     scrollController.addListener(() {
-      if (scrollController.offset > 350 && !showBackToTop) {
+      if (scrollController.offset > 180 && !showBackToTop) {
         setState(() {
           showBackToTop = true;
         });
-      } else if (scrollController.offset <= 350 && showBackToTop) {
+      } else if (scrollController.offset <= 180 && showBackToTop) {
         setState(() {
           showBackToTop = false;
         });

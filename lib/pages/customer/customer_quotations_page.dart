@@ -13,14 +13,42 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
   String selectedStatus = 'Sent';
   String searchText = '';
   bool isLoading = false;
-
+  final ScrollController scrollController = ScrollController();
+  bool showBackToTop = false;
   Map<String, dynamic>? currentCustomer;
   List<Map<String, dynamic>> quotations = [];
 
   @override
   void initState() {
     super.initState();
+
     loadQuotations();
+
+    scrollController.addListener(() {
+      if (scrollController.offset > 180 && !showBackToTop) {
+        setState(() {
+          showBackToTop = true;
+        });
+      } else if (scrollController.offset <= 180 && showBackToTop) {
+        setState(() {
+          showBackToTop = false;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  void scrollToTop() {
+    scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> loadQuotations() async {
@@ -274,8 +302,11 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
     final vehicle = quotation['vehicles'] ?? {};
     final items = quotation['quotation_items'] as List? ?? [];
     final status = quotation['status'] ?? 'Sent';
+    final isArrived = quotation['is_arrived'] == true;
+
     final total =
         double.tryParse(quotation['total'].toString()) ?? calculateTotal(items);
+
     final isSent = status == 'Sent';
 
     showDialog(
@@ -303,6 +334,13 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
                     quotation['problem_description'] ?? 'No description',
                   ),
                   buildDetailBox('Status', status),
+
+                  if (status == 'Confirmed')
+                    buildDetailBox(
+                      'Vehicle Arrival',
+                      isArrived ? 'Arrived' : 'Not Arrived',
+                    ),
+
                   const SizedBox(height: 14),
                   const Text(
                     'Quotation Items',
@@ -516,6 +554,7 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
     final vehicle = quotation['vehicles'] ?? {};
     final items = quotation['quotation_items'] as List? ?? [];
     final status = quotation['status'] ?? 'Sent';
+    final isArrived = quotation['is_arrived'] == true;
     final total =
         double.tryParse(quotation['total'].toString()) ?? calculateTotal(items);
 
@@ -597,6 +636,36 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
                         ),
                       ),
                     ),
+                    if (status == 'Confirmed') ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isArrived
+                                ? Icons.check_circle
+                                : Icons.schedule,
+                            color: isArrived
+                                ? Colors.green
+                                : Colors.orange,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            isArrived
+                                ? 'Vehicle Arrived'
+                                : 'Vehicle Not Arrived',
+                            style: TextStyle(
+                              color: isArrived
+                                  ? Colors.green
+                                  : Colors.orange,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -632,7 +701,6 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
         backgroundColor: const Color(0xFF339BFF),
         foregroundColor: Colors.white,
         elevation: 0,
-
         actions: const [
           NotificationBell(
             isAdmin: false,
@@ -640,110 +708,170 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
         ],
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-            decoration: const BoxDecoration(
-              color: Color(0xFF339BFF),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(26),
-                bottomRight: Radius.circular(26),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Quotation List',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
+          : RefreshIndicator(
+        onRefresh: loadQuotations,
+        child: CustomScrollView(
+          controller: scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  16,
+                  16,
+                  20,
+                ),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF339BFF),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(26),
+                    bottomRight: Radius.circular(26),
                   ),
                 ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Review workshop quotations and make your decision',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-                const SizedBox(height: 16),
-                Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    buildSummaryCard(
-                      icon: Icons.pending_actions,
-                      title: 'Waiting',
-                      value: '${getStatusCount('Sent')}',
+                    const Text(
+                      'Quotation List',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    const SizedBox(width: 12),
-                    buildSummaryCard(
-                      icon: Icons.check_circle,
-                      title: 'Confirmed',
-                      value: '${getStatusCount('Confirmed')}',
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Review workshop quotations and make your decision',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        buildSummaryCard(
+                          icon: Icons.pending_actions,
+                          title: 'Waiting',
+                          value: '${getStatusCount('Sent')}',
+                        ),
+                        const SizedBox(width: 12),
+                        buildSummaryCard(
+                          icon: Icons.check_circle,
+                          title: 'Confirmed',
+                          value: '${getStatusCount('Confirmed')}',
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    TextField(
+                      onChanged: (value) {
+                        setState(() {
+                          searchText = value;
+                        });
+                      },
+                      decoration: InputDecoration(
+                        hintText:
+                        'Search by plate number or car model',
+                        prefixIcon: const Icon(Icons.search),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding:
+                        const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius:
+                          BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  onChanged: (value) {
-                    setState(() => searchText = value);
-                  },
-                  decoration: InputDecoration(
-                    hintText: 'Search by plate number or car model',
-                    prefixIcon: const Icon(Icons.search),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: BorderSide.none,
+              ),
+            ),
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  16,
+                  16,
+                  8,
+                ),
+                child: Row(
+                  children: [
+                    buildStatusButton('Sent'),
+                    const SizedBox(width: 8),
+                    buildStatusButton('Confirmed'),
+                    const SizedBox(width: 8),
+                    buildStatusButton('Cancelled'),
+                  ],
+                ),
+              ),
+            ),
+
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 8),
+            ),
+
+            if (displayQuotations.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Text(
+                    'No $selectedStatus quotations found.',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: Colors.black54,
                     ),
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                buildStatusButton('Sent'),
-                const SizedBox(width: 8),
-                buildStatusButton('Confirmed'),
-                const SizedBox(width: 8),
-                buildStatusButton('Cancelled'),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: displayQuotations.isEmpty
-                ? Center(
-              child: Text(
-                'No $selectedStatus quotations found.',
-                style: const TextStyle(
-                  fontSize: 16,
-                  color: Colors.black54,
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  100,
+                ),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                      return buildQuotationCard(
+                        displayQuotations[index],
+                      );
+                    },
+                    childCount: displayQuotations.length,
+                  ),
                 ),
               ),
-            )
-                : RefreshIndicator(
-              onRefresh: loadQuotations,
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: displayQuotations.length,
-                itemBuilder: (context, index) {
-                  return buildQuotationCard(
-                    displayQuotations[index],
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
+      floatingActionButton: showBackToTop
+          ? FloatingActionButton.small(
+        heroTag: 'customerQuotationBackToTop',
+        backgroundColor: const Color(0xFF339BFF),
+        foregroundColor: Colors.white,
+        elevation: 4,
+        onPressed: scrollToTop,
+        child: const Icon(
+          Icons.keyboard_arrow_up,
+        ),
+      )
+          : null,
     );
   }
 }
