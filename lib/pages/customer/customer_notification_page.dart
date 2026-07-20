@@ -11,13 +11,49 @@ class CustomerNotificationPage extends StatefulWidget {
 
 class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
   bool isLoading = false;
+
+  final ScrollController scrollController = ScrollController();
+  bool showBackToTop = false;
+
+  static String savedFilter = 'Today';
+  String selectedFilter = savedFilter;
+
   List<Map<String, dynamic>> notifications = [];
   Map<String, dynamic>? currentCustomer;
 
   @override
   void initState() {
     super.initState();
+
     loadNotifications();
+
+    scrollController.addListener(() {
+      if (!mounted) return;
+
+      if (scrollController.offset > 180 && !showBackToTop) {
+        setState(() {
+          showBackToTop = true;
+        });
+      } else if (scrollController.offset <= 180 && showBackToTop) {
+        setState(() {
+          showBackToTop = false;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  void scrollToTop() {
+    scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> fetchCurrentCustomer() async {
@@ -91,18 +127,135 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
     }
   }
 
-  Future<void> deleteNotification(Map<String, dynamic> item) async {
+  Future<void> deleteNotification(
+      Map<String, dynamic> item,
+      ) async {
+    final deletedItem = Map<String, dynamic>.from(item);
+
     try {
       await supabase
           .from('notifications')
           .delete()
-          .eq('notification_id', item['notification_id']);
+          .eq(
+        'notification_id',
+        item['notification_id'],
+      );
 
       await loadNotifications();
-      showMessage('Notification deleted.');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          content: const Text('Notification deleted.'),
+          action: SnackBarAction(
+            label: 'UNDO',
+            textColor: Colors.amber,
+            onPressed: () async {
+              await restoreDeletedNotification(
+                deletedItem,
+              );
+            },
+          ),
+        ),
+      );
     } catch (error) {
-      showMessage('Failed to delete notification: $error');
+      showMessage(
+        'Failed to delete notification: $error',
+      );
     }
+  }
+
+  Future<void> restoreDeletedNotification(
+      Map<String, dynamic> deletedItem,
+      ) async {
+    try {
+      await supabase
+          .from('notifications')
+          .insert(deletedItem);
+
+      await loadNotifications();
+      showMessage('Notification restored.');
+    } catch (error) {
+      showMessage(
+        'Failed to restore notification: $error',
+      );
+    }
+  }
+
+  Future<bool> showDeleteConfirmation(
+      Map<String, dynamic> item,
+      ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: Color(0xFFFFEAEA),
+                child: Icon(
+                  Icons.delete_outline,
+                  color: Colors.red,
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text('Delete Notification'),
+              ),
+            ],
+          ),
+          content: const Text(
+            'Are you sure you want to delete this notification?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(
+                  dialogContext,
+                  false,
+                );
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                Navigator.pop(
+                  dialogContext,
+                  true,
+                );
+              },
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return confirmed == true;
+  }
+
+  Future<void> confirmAndDeleteNotification(
+      Map<String, dynamic> item,
+      ) async {
+    final confirmed =
+    await showDeleteConfirmation(item);
+
+    if (!confirmed) return;
+
+    await deleteNotification(item);
   }
 
   Future<void> clearAllNotifications() async {
@@ -195,7 +348,7 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
   String formatDate(dynamic value) {
     if (value == null) return '';
 
-    final date = DateTime.tryParse(value.toString());
+    final date = DateTime.tryParse(value.toString())?.toLocal();
     if (date == null) return '';
 
     return '${date.day.toString().padLeft(2, '0')}/'
@@ -223,11 +376,36 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
     return 'Earlier';
   }
 
+  bool isSameDate(DateTime first, DateTime second) {
+    return first.year == second.year &&
+        first.month == second.month &&
+        first.day == second.day;
+  }
+
+  List<Map<String, dynamic>> get filteredNotifications {
+    if (selectedFilter == 'All') {
+      return notifications;
+    }
+
+    final now = DateTime.now();
+
+    return notifications.where((item) {
+      final createdAt =
+      DateTime.tryParse(
+        item['created_at']?.toString() ?? '',
+      )?.toLocal();
+
+      if (createdAt == null) return false;
+
+      return isSameDate(createdAt, now);
+    }).toList();
+  }
+
   List<Map<String, dynamic>> getGroupedDisplayItems() {
     final List<Map<String, dynamic>> items = [];
     String? currentGroup;
 
-    for (final notification in notifications) {
+    for (final notification in filteredNotifications) {
       final group = getDateGroup(notification['created_at']);
 
       if (group != currentGroup) {
@@ -245,6 +423,55 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
     }
 
     return items;
+  }
+
+  Widget buildSummaryCard({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.95),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: const Color(0xFFD7E5FA),
+              child: Icon(
+                icon,
+                color: const Color(0xFF339BFF),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget buildGroupHeader(String title) {
@@ -297,6 +524,11 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
         ),
       ),
       confirmDismiss: (_) async {
+        final confirmed =
+        await showDeleteConfirmation(item);
+
+        if (!confirmed) return false;
+
         await deleteNotification(item);
         return false;
       },
@@ -379,7 +611,9 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
               color: Colors.red,
               size: 22,
             ),
-            onPressed: () => deleteNotification(item),
+            onPressed: () {
+              confirmAndDeleteNotification(item);
+            },
           ),
         ),
       ),
@@ -400,6 +634,8 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
   @override
   Widget build(BuildContext context) {
     final groupedItems = getGroupedDisplayItems();
+    final displayNotifications =
+        filteredNotifications;
 
     return Scaffold(
       backgroundColor: const Color(0xFFD7E5FA),
@@ -410,14 +646,65 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Filter Notifications',
+            icon: const Icon(Icons.filter_list),
+            initialValue: selectedFilter,
+            onSelected: (value) {
+              setState(() {
+                selectedFilter = value;
+                savedFilter = value;
+              });
+
+              if (scrollController.hasClients) {
+                scrollController.animateTo(
+                  0,
+                  duration: const Duration(milliseconds: 350),
+                  curve: Curves.easeOut,
+                );
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'Today',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.today,
+                      color: Color(0xFF339BFF),
+                    ),
+                    SizedBox(width: 10),
+                    Text('Today Only'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'All',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.notifications,
+                      color: Color(0xFF339BFF),
+                    ),
+                    SizedBox(width: 10),
+                    Text('All Notifications'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
           if (unreadCount > 0)
             TextButton(
               onPressed: markAllAsRead,
               child: const Text(
                 'Read All',
-                style: TextStyle(color: Colors.white),
+                style: TextStyle(
+                  color: Colors.white,
+                ),
               ),
             ),
+
           if (notifications.isNotEmpty)
             IconButton(
               onPressed: showClearAllDialog,
@@ -427,38 +714,147 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
         ],
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
           : RefreshIndicator(
         onRefresh: loadNotifications,
-        child: notifications.isEmpty
-            ? ListView(
-          children: const [
-            SizedBox(height: 220),
-            Center(
-              child: Text(
-                'No notifications yet.',
-                style: TextStyle(
-                  color: Colors.black54,
-                  fontSize: 16,
+        child: CustomScrollView(
+          controller: scrollController,
+          physics:
+          const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  16,
+                  16,
+                  20,
+                ),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF339BFF),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft:
+                    Radius.circular(26),
+                    bottomRight:
+                    Radius.circular(26),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Notification Center',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      selectedFilter == 'Today'
+                          ? 'Showing today’s notifications'
+                          : 'Showing all notifications',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        buildSummaryCard(
+                          icon: Icons.notifications,
+                          title: 'Total',
+                          value:
+                          '${notifications.length}',
+                        ),
+                        const SizedBox(width: 12),
+                        buildSummaryCard(
+                          icon:
+                          Icons.mark_email_unread,
+                          title: 'Unread',
+                          value: '$unreadCount',
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
+
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 14),
+            ),
+
+            if (displayNotifications.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Text(
+                    selectedFilter == 'Today'
+                        ? 'No notifications for today.'
+                        : 'No notifications yet.',
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  100,
+                ),
+                sliver: SliverList(
+                  delegate:
+                  SliverChildBuilderDelegate(
+                        (context, index) {
+                      final item =
+                      groupedItems[index];
+
+                      if (item['type'] ==
+                          'header') {
+                        return buildGroupHeader(
+                          item['title'],
+                        );
+                      }
+
+                      return buildNotificationCard(
+                        item['data'],
+                      );
+                    },
+                    childCount:
+                    groupedItems.length,
+                  ),
+                ),
+              ),
           ],
-        )
-            : ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: groupedItems.length,
-          itemBuilder: (context, index) {
-            final item = groupedItems[index];
-
-            if (item['type'] == 'header') {
-              return buildGroupHeader(item['title']);
-            }
-
-            return buildNotificationCard(item['data']);
-          },
         ),
       ),
+      floatingActionButton: showBackToTop
+          ? FloatingActionButton.small(
+        heroTag:
+        'customerNotificationBackToTop',
+        backgroundColor:
+        const Color(0xFF339BFF),
+        foregroundColor: Colors.white,
+        elevation: 4,
+        onPressed: scrollToTop,
+        child: const Icon(
+          Icons.keyboard_arrow_up,
+        ),
+      )
+          : null,
     );
   }
 }
