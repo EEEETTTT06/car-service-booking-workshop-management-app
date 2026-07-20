@@ -17,7 +17,9 @@ class ServiceRecordsPage extends StatefulWidget {
 
 class _ServiceRecordsPageState extends State<ServiceRecordsPage> {
   final TextEditingController searchController = TextEditingController();
+  final ScrollController scrollController = ScrollController();
 
+  bool showBackToTop = false;
   String searchText = '';
   String selectedQuickFilter = 'All';
   bool isLoading = false;
@@ -36,12 +38,33 @@ class _ServiceRecordsPageState extends State<ServiceRecordsPage> {
     }
 
     loadData();
+
+    scrollController.addListener(() {
+      if (scrollController.offset > 180 && !showBackToTop) {
+        setState(() {
+          showBackToTop = true;
+        });
+      } else if (scrollController.offset <= 180 && showBackToTop) {
+        setState(() {
+          showBackToTop = false;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     searchController.dispose();
+    scrollController.dispose();
     super.dispose();
+  }
+
+  void scrollToTop() {
+    scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> loadData() async {
@@ -588,7 +611,6 @@ class _ServiceRecordsPageState extends State<ServiceRecordsPage> {
         backgroundColor: const Color(0xFF339BFF),
         foregroundColor: Colors.white,
         elevation: 0,
-
         actions: const [
           NotificationBell(
             isAdmin: false,
@@ -596,140 +618,219 @@ class _ServiceRecordsPageState extends State<ServiceRecordsPage> {
         ],
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-            decoration: const BoxDecoration(
-              color: Color(0xFF339BFF),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(26),
-                bottomRight: Radius.circular(26),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Service History',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
+          : RefreshIndicator(
+        onRefresh: loadData,
+        child: CustomScrollView(
+          controller: scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  16,
+                  16,
+                  20,
+                ),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF339BFF),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(26),
+                    bottomRight: Radius.circular(26),
                   ),
                 ),
-                const SizedBox(height: 6),
-                const Text(
-                  'View your vehicle service records and bills',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    buildSummaryCard(
-                      icon: Icons.history,
-                      title: 'Records',
-                      value: '$totalRecords',
+                    const Text(
+                      'Service History',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    const SizedBox(width: 12),
-                    buildSummaryCard(
-                      icon: Icons.payments,
-                      title: 'Total Spend',
-                      value: 'RM ${totalSpend.toStringAsFixed(0)}',
+                    const SizedBox(height: 6),
+                    const Text(
+                      'View your vehicle service records and bills',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        buildSummaryCard(
+                          icon: Icons.history,
+                          title: 'Records',
+                          value: '$totalRecords',
+                        ),
+                        const SizedBox(width: 12),
+                        buildSummaryCard(
+                          icon: Icons.payments,
+                          title: 'Total Spend',
+                          value:
+                          'RM ${totalSpend.toStringAsFixed(0)}',
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    TextField(
+                      controller: searchController,
+                      onChanged: (value) {
+                        setState(() {
+                          searchText = value;
+                        });
+                      },
+                      decoration: InputDecoration(
+                        hintText:
+                        'Search by plate number or car model',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: searchText.isEmpty
+                            ? null
+                            : IconButton(
+                          tooltip: 'Clear Search',
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            searchController.clear();
+
+                            setState(() {
+                              searchText = '';
+                            });
+                          },
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding:
+                        const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius:
+                          BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: searchController,
-                  onChanged: (value) {
-                    setState(() {
-                      searchText = value;
-                    });
-                  },
-                  decoration: InputDecoration(
-                    hintText: 'Search by plate number or car model',
-                    prefixIcon: const Icon(Icons.search),
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
+              ),
+            ),
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  0,
+                  14,
+                  0,
+                  0,
+                ),
+                child: SizedBox(
+                  height: 48,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(
                       horizontal: 16,
-                      vertical: 14,
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: BorderSide.none,
-                    ),
+                    children: [
+                      buildQuickFilterChip('All'),
+                      buildQuickFilterChip('Nearest Date'),
+                      buildQuickFilterChip('Highest Amount'),
+                      buildQuickFilterChip('Lowest Amount'),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 48,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: [
-                buildQuickFilterChip('All'),
-                buildQuickFilterChip('Nearest Date'),
-                buildQuickFilterChip('Highest Amount'),
-                buildQuickFilterChip('Lowest Amount'),
-              ],
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  4,
+                  16,
+                  12,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${displayRecords.length} record(s) found',
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      selectedQuickFilter,
+                      style: const TextStyle(
+                        color: Color(0xFF339BFF),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Row(
-              children: [
-                Expanded(
+
+            if (displayRecords.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
                   child: Text(
-                    '${displayRecords.length} record(s) found',
-                    style: const TextStyle(
+                    'No service records found.',
+                    style: TextStyle(
+                      fontSize: 16,
                       color: Colors.black54,
-                      fontSize: 13,
                     ),
                   ),
                 ),
-                Text(
-                  selectedQuickFilter,
-                  style: const TextStyle(
-                    color: Color(0xFF339BFF),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  100,
+                ),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                      return buildRecordCard(
+                        displayRecords[index],
+                      );
+                    },
+                    childCount: displayRecords.length,
                   ),
                 ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: displayRecords.isEmpty
-                ? const Center(
-              child: Text(
-                'No service records found.',
-                style: TextStyle(fontSize: 16),
               ),
-            )
-                : RefreshIndicator(
-              onRefresh: loadData,
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: displayRecords.length,
-                itemBuilder: (context, index) {
-                  final record = displayRecords[index];
-                  return buildRecordCard(record);
-                },
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
+      floatingActionButton: showBackToTop
+          ? FloatingActionButton.small(
+        heroTag: 'serviceRecordsBackToTop',
+        backgroundColor: const Color(0xFF339BFF),
+        foregroundColor: Colors.white,
+        elevation: 4,
+        onPressed: scrollToTop,
+        child: const Icon(
+          Icons.keyboard_arrow_up,
+        ),
+      )
+          : null,
     );
   }
 }
