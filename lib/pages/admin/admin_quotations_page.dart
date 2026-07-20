@@ -46,10 +46,16 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     });
 
     scrollController.addListener(() {
-      if (scrollController.offset > 350 && !showBackToTop) {
-        setState(() => showBackToTop = true);
-      } else if (scrollController.offset <= 350 && showBackToTop) {
-        setState(() => showBackToTop = false);
+      if (!mounted) return;
+
+      final shouldShow =
+          scrollController.hasClients &&
+              scrollController.offset > 350;
+
+      if (shouldShow != showBackToTop) {
+        setState(() {
+          showBackToTop = shouldShow;
+        });
       }
     });
   }
@@ -61,6 +67,8 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
   }
 
   void scrollToTop() {
+    if (!scrollController.hasClients) return;
+
     scrollController.animateTo(
       0,
       duration: const Duration(milliseconds: 450),
@@ -190,7 +198,17 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
       String? bookingId = selectedVehicleData['booking_id']?.toString();
 
       if (vehicleId == null) {
-        showMessage('Vehicle information is missing.');
+        showMessage(
+          'Vehicle information is missing.',
+        );
+        return;
+      }
+
+      if (customerId == null ||
+          customerId.toString().trim().isEmpty) {
+        showMessage(
+          'Please link this vehicle to a customer before creating a quotation.',
+        );
         return;
       }
 
@@ -280,20 +298,77 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     required bool isSent,
   }) async {
     try {
+      final currentQuotation = await supabase
+          .from('quotations')
+          .select('quotation_id, status')
+          .eq(
+        'quotation_id',
+        quotationId,
+      )
+          .maybeSingle();
+
+      if (currentQuotation == null) {
+        showMessage(
+          'Quotation was not found.',
+        );
+        return;
+      }
+
+      if (currentQuotation['status'] != 'Draft') {
+        showMessage(
+          'Only a draft quotation can be edited.',
+        );
+
+        await loadData();
+        return;
+      }
+
+      if (items.isEmpty) {
+        showMessage(
+          'Please add at least one quotation item.',
+        );
+        return;
+      }
+
       final total = calculateTotal(items);
 
-      await supabase.from('quotations').update({
-        'problem_description': problem,
+      final updatedQuotation = await supabase
+          .from('quotations')
+          .update({
+        'problem_description': problem.trim(),
         'total': total,
-        'status': status,
-        'is_sent': isSent,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('quotation_id', quotationId);
+        'status': 'Draft',
+        'is_sent': false,
+        'updated_at':
+        DateTime.now().toIso8601String(),
+      })
+          .eq(
+        'quotation_id',
+        quotationId,
+      )
+          .eq(
+        'status',
+        'Draft',
+      )
+          .select('quotation_id')
+          .maybeSingle();
+
+      if (updatedQuotation == null) {
+        showMessage(
+          'Quotation status has changed. Please refresh the page.',
+        );
+
+        await loadData();
+        return;
+      }
 
       await supabase
           .from('quotation_items')
           .delete()
-          .eq('quotation_id', quotationId);
+          .eq(
+        'quotation_id',
+        quotationId,
+      );
 
       for (final item in items) {
         await supabase.from('quotation_items').insert({
@@ -306,9 +381,13 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
 
       await loadData();
 
-      showMessage('Quotation updated successfully.');
+      showMessage(
+        'Quotation updated successfully.',
+      );
     } catch (error) {
-      showMessage('Failed to update quotation: $error');
+      showMessage(
+        'Failed to update quotation: $error',
+      );
     }
   }
 
@@ -350,13 +429,25 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
       Map<String, dynamic> quotation,
       ) async {
     try {
-      final quotationId = quotation['quotation_id']?.toString();
+      final quotationId =
+      quotation['quotation_id']?.toString();
+
       final vehicleId = quotation['vehicle_id'];
       final customerId = quotation['customer_id'];
       final bookingId = quotation['booking_id'];
 
-      if (quotationId == null || quotationId.isEmpty) {
-        showMessage('Quotation information is missing.');
+      if (quotationId == null ||
+          quotationId.isEmpty) {
+        showMessage(
+          'Quotation information is missing.',
+        );
+        return;
+      }
+
+      if (vehicleId == null) {
+        showMessage(
+          'Vehicle information is missing.',
+        );
         return;
       }
 
@@ -368,54 +459,141 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
       }
 
       if (quotation['is_arrived'] == true) {
-        showMessage('This vehicle has already been marked as arrived.');
-        return;
-      }
-
-      final existingPendingService = await supabase
-          .from('pending_services')
-          .select('pending_id')
-          .eq('quotation_id', quotationId)
-          .maybeSingle();
-
-      if (existingPendingService != null) {
-        await supabase.from('quotations').update({
-          'is_arrived': true,
-          'updated_at': DateTime.now().toIso8601String(),
-        }).eq('quotation_id', quotationId);
-
-        await loadData();
-
         showMessage(
-          'Vehicle is already available in Pending Services.',
+          'This vehicle has already been marked as arrived.',
         );
         return;
       }
 
-      await supabase.from('pending_services').insert({
-        'vehicle_id': vehicleId,
-        'customer_id': customerId,
-        'booking_id': bookingId,
-        'quotation_id': quotationId,
-        'service_type':
-        bookingId == null ? 'Walk-in' : 'Appointment',
-        'status': 'Waiting Fix',
-        'note':
-        quotation['problem_description'] ??
-            'Vehicle arrived for confirmed quotation.',
-        'created_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      });
+      final activePendingResponse = await supabase
+          .from('pending_services')
+          .select('''
+          pending_id,
+          quotation_id,
+          customer_id,
+          booking_id,
+          status,
+          note
+        ''')
+          .eq(
+        'vehicle_id',
+        vehicleId,
+      )
+          .neq(
+        'status',
+        'Completed',
+      )
+          .order(
+        'created_at',
+        ascending: false,
+      )
+          .limit(1);
 
-      await supabase.from('quotations').update({
+      final activePendingRows =
+      List<Map<String, dynamic>>.from(
+        activePendingResponse,
+      );
+
+      final activePending = activePendingRows.isEmpty
+          ? null
+          : activePendingRows.first;
+
+      if (activePending != null) {
+        final linkedQuotationId =
+        activePending['quotation_id']?.toString();
+
+        if (linkedQuotationId != null &&
+            linkedQuotationId.isNotEmpty &&
+            linkedQuotationId != quotationId) {
+          showMessage(
+            'This vehicle already has another active pending service.',
+          );
+          return;
+        }
+
+        await supabase.from('pending_services').update({
+          'quotation_id': quotationId,
+          'customer_id':
+          activePending['customer_id'] ??
+              customerId,
+          'booking_id':
+          activePending['booking_id'] ??
+              bookingId,
+          'note':
+          quotation['problem_description'] ??
+              activePending['note'] ??
+              'Vehicle arrived for confirmed quotation.',
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq(
+          'pending_id',
+          activePending['pending_id'],
+        );
+      } else {
+        await supabase.from('pending_services').insert({
+          'vehicle_id': vehicleId,
+          'customer_id': customerId,
+          'booking_id': bookingId,
+          'quotation_id': quotationId,
+          'service_type':
+          bookingId == null
+              ? 'Walk-in'
+              : 'Appointment',
+          'status': 'Waiting Fix',
+          'note':
+          quotation['problem_description'] ??
+              'Vehicle arrived for confirmed quotation.',
+          'created_at':
+          DateTime.now().toIso8601String(),
+          'updated_at':
+          DateTime.now().toIso8601String(),
+        });
+      }
+
+      final updatedQuotation = await supabase
+          .from('quotations')
+          .update({
         'is_arrived': true,
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('quotation_id', quotationId);
+      })
+          .eq(
+        'quotation_id',
+        quotationId,
+      )
+          .eq(
+        'status',
+        'Confirmed',
+      )
+          .select('quotation_id')
+          .maybeSingle();
+
+      if (updatedQuotation == null) {
+        showMessage(
+          'Quotation status has changed. Please refresh the page.',
+        );
+        await loadData();
+        return;
+      }
+
+      if (bookingId != null) {
+        await supabase.from('bookings').update({
+          'status': 'Arrived',
+        }).eq(
+          'booking_id',
+          bookingId,
+        ).neq(
+          'status',
+          'Completed',
+        ).neq(
+          'status',
+          'Cancelled',
+        );
+      }
 
       if (customerId != null) {
         final vehicle = quotation['vehicles'] ?? {};
         final plate =
-            vehicle['plate_number']?.toString() ?? 'your vehicle';
+            vehicle['plate_number']?.toString() ??
+                'your vehicle';
 
         const title = 'Vehicle Arrived';
         final message =
@@ -428,6 +606,7 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
           'quotation_id': quotationId,
           'title': title,
           'message': message,
+          'notification_type': 'service',
           'is_read': false,
         });
 
@@ -440,17 +619,19 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
 
       await loadData();
 
-      if (mounted) {
-        setState(() {
-          selectedStatus = 'Confirmed';
-        });
-      }
+      if (!mounted) return;
+
+      setState(() {
+        selectedStatus = 'Confirmed';
+      });
 
       showMessage(
         'Vehicle marked as arrived and added to Pending Services.',
       );
     } catch (error) {
-      showMessage('Failed to mark vehicle as arrived: $error');
+      showMessage(
+        'Failed to mark vehicle as arrived: $error',
+      );
     }
   }
 
@@ -459,26 +640,190 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
       final quotation = await supabase
           .from('quotations')
           .select('''
-            *,
-            vehicles(plate_number)
-          ''')
-          .eq('quotation_id', quotationId)
-          .single();
+          *,
+          vehicles(plate_number)
+        ''')
+          .eq(
+        'quotation_id',
+        quotationId,
+      )
+          .maybeSingle();
 
-      await supabase.from('quotations').update({
+      if (quotation == null) {
+        showMessage('Quotation was not found.');
+        return;
+      }
+
+      if (quotation['status'] != 'Draft') {
+        showMessage(
+          'Only a draft quotation can be sent.',
+        );
+        await loadData();
+        return;
+      }
+
+      final customerId = quotation['customer_id'];
+
+      if (customerId == null) {
+        showMessage(
+          'This quotation does not have a customer.',
+        );
+        return;
+      }
+
+      final updatedQuotation = await supabase
+          .from('quotations')
+          .update({
         'status': 'Sent',
         'is_sent': true,
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('quotation_id', quotationId);
+      })
+          .eq(
+        'quotation_id',
+        quotationId,
+      )
+          .eq(
+        'status',
+        'Draft',
+      )
+          .select('quotation_id')
+          .maybeSingle();
 
-      final customerId = quotation['customer_id'];
-      final plate = quotation['vehicles']?['plate_number'] ?? 'your vehicle';
+      if (updatedQuotation == null) {
+        showMessage(
+          'This quotation has already been processed.',
+        );
+        await loadData();
+        return;
+      }
+
+      await supabase.from('pending_services').update({
+        'note':
+        'Quotation sent and waiting for customer confirmation.',
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq(
+        'quotation_id',
+        quotationId,
+      );
+
+      final plate =
+          quotation['vehicles']?['plate_number'] ??
+              'your vehicle';
 
       const title = 'Quotation Available';
       final message =
           'A new quotation is available for $plate. Please review it.';
 
+      await supabase.from('notifications').insert({
+        'customer_id': customerId,
+        'vehicle_id': quotation['vehicle_id'],
+        'booking_id': quotation['booking_id'],
+        'quotation_id': quotationId,
+        'title': title,
+        'message': message,
+        'notification_type': 'quotation',
+        'is_read': false,
+      });
+
+      await sendQuotationNotification(
+        customerId: customerId.toString(),
+        title: title,
+        message: message,
+      );
+
+      await loadData();
+
+      if (!mounted) return;
+
+      setState(() {
+        selectedStatus = 'Sent';
+      });
+
+      showMessage('Quotation sent to customer.');
+    } catch (error) {
+      showMessage(
+        'Failed to send quotation: $error',
+      );
+    }
+  }
+
+  Future<void> cancelQuotation(
+      String quotationId,
+      ) async {
+    try {
+      final quotation = await supabase
+          .from('quotations')
+          .select('''
+          *,
+          vehicles(plate_number)
+        ''')
+          .eq(
+        'quotation_id',
+        quotationId,
+      )
+          .maybeSingle();
+
+      if (quotation == null) {
+        showMessage('Quotation was not found.');
+        return;
+      }
+
+      if (quotation['status'] != 'Sent') {
+        showMessage(
+          'Only a sent quotation can be cancelled.',
+        );
+        await loadData();
+        return;
+      }
+
+      final updatedQuotation = await supabase
+          .from('quotations')
+          .update({
+        'status': 'Cancelled',
+        'is_sent': false,
+        'updated_at': DateTime.now().toIso8601String(),
+      })
+          .eq(
+        'quotation_id',
+        quotationId,
+      )
+          .eq(
+        'status',
+        'Sent',
+      )
+          .select('quotation_id')
+          .maybeSingle();
+
+      if (updatedQuotation == null) {
+        showMessage(
+          'This quotation has already been processed.',
+        );
+        await loadData();
+        return;
+      }
+
+      await supabase.from('pending_services').update({
+        'quotation_id': null,
+        'status': 'Waiting Fix',
+        'note':
+        'Quotation cancelled. A replacement quotation can be created.',
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq(
+        'quotation_id',
+        quotationId,
+      );
+
+      final customerId = quotation['customer_id'];
+
       if (customerId != null) {
+        final plate =
+            quotation['vehicles']?['plate_number'] ??
+                'your vehicle';
+
+        const title = 'Quotation Cancelled';
+        final message =
+            'The workshop cancelled the quotation for $plate. A new quotation may be prepared.';
+
         await supabase.from('notifications').insert({
           'customer_id': customerId,
           'vehicle_id': quotation['vehicle_id'],
@@ -486,11 +831,12 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
           'quotation_id': quotationId,
           'title': title,
           'message': message,
+          'notification_type': 'quotation',
           'is_read': false,
         });
 
         await sendQuotationNotification(
-          customerId: customerId,
+          customerId: customerId.toString(),
           title: title,
           message: message,
         );
@@ -498,69 +844,88 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
 
       await loadData();
 
-      if (mounted) {
-        setState(() => selectedStatus = 'Sent');
-      }
+      if (!mounted) return;
 
-      showMessage('Quotation sent to customer.');
-    } catch (error) {
-      showMessage('Failed to send quotation: $error');
-    }
-  }
-
-  Future<void> cancelQuotation(String quotationId) async {
-    try {
-      await supabase.from('quotations').update({
-        'status': 'Cancelled',
-        'is_sent': false,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('quotation_id', quotationId);
-
-      await supabase
-          .from('pending_services')
-          .update({
-        'quotation_id': null,
-        'note':
-        'Quotation cancelled. A replacement quotation can be created.',
-        'updated_at': DateTime.now().toIso8601String(),
-      })
-          .eq('quotation_id', quotationId);
-
-      await loadData();
-
-      if (mounted) {
-        setState(() {
-          selectedStatus = 'Cancelled';
-        });
-      }
+      setState(() {
+        selectedStatus = 'Cancelled';
+      });
 
       showMessage('Quotation cancelled.');
     } catch (error) {
-      showMessage('Failed to cancel quotation: $error');
+      showMessage(
+        'Failed to cancel quotation: $error',
+      );
     }
   }
 
-  Future<void> deleteQuotation(String quotationId) async {
+  Future<void> deleteQuotation(
+      String quotationId,
+      ) async {
     try {
-      await supabase
-          .from('pending_services')
-          .update({
-        'quotation_id': null,
-        'note': 'Quotation draft deleted. A new quotation can be created.',
-        'updated_at': DateTime.now().toIso8601String(),
-      })
-          .eq('quotation_id', quotationId);
+      final quotation = await supabase
+          .from('quotations')
+          .select('quotation_id, status')
+          .eq(
+        'quotation_id',
+        quotationId,
+      )
+          .maybeSingle();
 
-      await supabase
+      if (quotation == null) {
+        showMessage('Quotation was not found.');
+        return;
+      }
+
+      if (quotation['status'] != 'Draft') {
+        showMessage(
+          'Only a draft quotation can be deleted.',
+        );
+        await loadData();
+        return;
+      }
+
+      await supabase.from('pending_services').update({
+        'quotation_id': null,
+        'status': 'Waiting Fix',
+        'note':
+        'Quotation draft deleted. A new quotation can be created.',
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq(
+        'quotation_id',
+        quotationId,
+      );
+
+      final deletedQuotation = await supabase
           .from('quotations')
           .delete()
-          .eq('quotation_id', quotationId);
+          .eq(
+        'quotation_id',
+        quotationId,
+      )
+          .eq(
+        'status',
+        'Draft',
+      )
+          .select('quotation_id')
+          .maybeSingle();
+
+      if (deletedQuotation == null) {
+        showMessage(
+          'This quotation could not be deleted.',
+        );
+        await loadData();
+        return;
+      }
 
       await loadData();
-      if (mounted) setState(() {});
-      showMessage('Quotation deleted successfully.');
+
+      showMessage(
+        'Quotation deleted successfully.',
+      );
     } catch (error) {
-      showMessage('Failed to delete quotation: $error');
+      showMessage(
+        'Failed to delete quotation: $error',
+      );
     }
   }
 
@@ -867,17 +1232,8 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
                 Row(
                   children: [
                     buildCardActionButton(
-                      icon: Icons.edit,
-                      label: 'Edit',
-                      outlined: true,
-                      onPressed: () {
-                        showEditQuotationDialog(quotation);
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    buildCardActionButton(
                       icon: Icons.cancel_outlined,
-                      label: 'Cancel',
+                      label: 'Cancel Quotation',
                       outlined: true,
                       foregroundColor: Colors.red,
                       onPressed: () {

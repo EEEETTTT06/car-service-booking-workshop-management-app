@@ -13,14 +13,38 @@ class BookServicePage extends StatefulWidget {
 class _BookServicePageState extends State<BookServicePage> {
   String selectedFilter = 'Upcoming';
   bool isLoading = false;
-
+  final ScrollController scrollController = ScrollController();
+  bool showBackToTop = false;
   Map<String, dynamic>? currentCustomer;
   List<Map<String, dynamic>> bookings = [];
 
   @override
   void initState() {
     super.initState();
+
     loadBookings();
+
+    scrollController.addListener(() {
+      if (!mounted) return;
+
+      final shouldShow = scrollController.offset > 180;
+
+      if (shouldShow != showBackToTop) {
+        setState(() {
+          showBackToTop = shouldShow;
+        });
+      }
+    });
+  }
+
+  void scrollToTop() {
+    if (!scrollController.hasClients) return;
+
+    scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> loadBookings() async {
@@ -28,8 +52,9 @@ class _BookServicePageState extends State<BookServicePage> {
 
     try {
       await fetchCurrentCustomer();
+      await updateExpiredBookings();
       await fetchBookings();
-    } catch (error) {
+    }catch (error) {
       showMessage('Failed to load bookings: $error');
     } finally {
       if (mounted) setState(() => isLoading = false);
@@ -79,6 +104,38 @@ class _BookServicePageState extends State<BookServicePage> {
         .order('appointment_date', ascending: true);
 
     bookings = List<Map<String, dynamic>>.from(response);
+  }
+
+  Future<void> updateExpiredBookings() async {
+    if (currentCustomer == null) return;
+
+    final now = DateTime.now();
+
+    final todaySql = toSqlDate(
+      DateTime(
+        now.year,
+        now.month,
+        now.day,
+      ),
+    );
+
+    await supabase
+        .from('bookings')
+        .update({
+      'status': 'Cancelled',
+    })
+        .eq(
+      'customer_id',
+      currentCustomer!['customer_id'],
+    )
+        .eq(
+      'status',
+      'Booked',
+    )
+        .lt(
+      'appointment_date',
+      todaySql,
+    );
   }
 
   Future<List<Map<String, dynamic>>> fetchAllServices() async {
@@ -148,18 +205,24 @@ class _BookServicePageState extends State<BookServicePage> {
   }
 
   String getDisplayStatus(Map<String, dynamic> booking) {
-    final bookingStatus = booking['status'] ?? 'Booked';
+    final bookingStatus =
+        booking['status']?.toString() ?? 'Booked';
+
     final progress = getServiceProgress(booking);
 
-    if (progress == 'Completed' || bookingStatus == 'Completed') {
+    if (progress == 'Completed' ||
+        bookingStatus == 'Completed') {
       return 'Completed';
     }
 
-    if (bookingStatus == 'Cancelled' || bookingStatus == 'Rejected') {
+    if (bookingStatus == 'Cancelled' ||
+        bookingStatus == 'Rejected') {
       return 'Cancelled';
     }
 
-    if (isPastBooking(booking['appointment_date'].toString()) &&
+    if (isPastBooking(
+      booking['appointment_date'].toString(),
+    ) &&
         bookingStatus != 'Arrived' &&
         bookingStatus != 'Completed') {
       return 'Cancelled';
@@ -237,26 +300,50 @@ class _BookServicePageState extends State<BookServicePage> {
   }
 
   Color getProgressColor(String status) {
-    if (status == 'Completed') return Colors.green;
-    if (status == 'Still Fixing') return Colors.blue;
-    if (status == 'Queuing') return Colors.orange;
-    if (status == 'Waiting Arrived') return Colors.grey;
+    if (status == 'Waiting Fix') {
+      return Colors.orange;
+    }
+
+    if (status == 'In Progress') {
+      return Colors.blue;
+    }
+
+    if (status == 'Completed') {
+      return Colors.green;
+    }
+
     return Colors.grey;
   }
 
   Color getProgressBackgroundColor(String status) {
-    if (status == 'Completed') return Colors.green.shade50;
-    if (status == 'Still Fixing') return Colors.blue.shade50;
-    if (status == 'Queuing') return Colors.orange.shade50;
-    if (status == 'Waiting Arrived') return Colors.grey.shade100;
+    if (status == 'Waiting Fix') {
+      return Colors.orange.shade50;
+    }
+
+    if (status == 'In Progress') {
+      return Colors.blue.shade50;
+    }
+
+    if (status == 'Completed') {
+      return Colors.green.shade50;
+    }
+
     return Colors.grey.shade100;
   }
 
   IconData getProgressIcon(String status) {
-    if (status == 'Completed') return Icons.check_circle;
-    if (status == 'Still Fixing') return Icons.build_circle;
-    if (status == 'Queuing') return Icons.pending_actions;
-    if (status == 'Waiting Arrived') return Icons.access_time;
+    if (status == 'Waiting Fix') {
+      return Icons.pending_actions;
+    }
+
+    if (status == 'In Progress') {
+      return Icons.build_circle;
+    }
+
+    if (status == 'Completed') {
+      return Icons.check_circle;
+    }
+
     return Icons.info;
   }
 
@@ -293,6 +380,7 @@ class _BookServicePageState extends State<BookServicePage> {
           'title': title,
           'message': body,
           'is_read': false,
+          'notification_type': 'booking',
         });
       }
 
@@ -359,6 +447,7 @@ class _BookServicePageState extends State<BookServicePage> {
           'title': title,
           'message': body,
           'is_read': false,
+          'notification_type': 'booking',
         });
       }
 
@@ -394,8 +483,37 @@ class _BookServicePageState extends State<BookServicePage> {
     required List<Map<String, dynamic>> selectedServices,
   }) async {
     try {
+      final newSqlDate = toSqlDate(newDate);
+
+      final existingBooking = await supabase
+          .from('bookings')
+          .select('booking_id')
+          .eq(
+        'vehicle_id',
+        booking['vehicle_id'],
+      )
+          .eq(
+        'appointment_date',
+        newSqlDate,
+      )
+          .neq(
+        'booking_id',
+        booking['booking_id'],
+      )
+          .neq(
+        'status',
+        'Cancelled',
+      )
+          .limit(1);
+
+      if (existingBooking.isNotEmpty) {
+        showMessage(
+          'This vehicle already has another booking on the selected date.',
+        );
+        return;
+      }
       await supabase.from('bookings').update({
-        'appointment_date': toSqlDate(newDate),
+        'appointment_date': newSqlDate,
         'problem_description': problem.trim(),
       }).eq('booking_id', booking['booking_id']);
 
@@ -423,25 +541,47 @@ class _BookServicePageState extends State<BookServicePage> {
     }
   }
 
-  void goToCalendarPage() {
-    Navigator.push(
+  Future<void> goToCalendarPage() async {
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CustomerBookingCalendarPage(
-          onBookingConfirmed: (_) async {
-            await loadBookings();
-          },
+          onBookingConfirmed: (_) {},
         ),
       ),
     );
+
+    if (!mounted) return;
+
+    await loadBookings();
   }
 
   void showBookingDetailDialog(Map<String, dynamic> booking) {
     final vehicle = booking['vehicles'] ?? {};
     final services = getServices(booking);
-    final status = booking['status'] ?? 'Booked';
+    final status =
+        booking['status']?.toString() ?? 'Booked';
+
     final progress = getServiceProgress(booking);
-    final date = formatDate(booking['appointment_date']);
+
+    final isAutoCancelled =
+        getDisplayStatus(booking) == 'Cancelled' &&
+            isPastBooking(
+              booking['appointment_date'].toString(),
+            ) &&
+            status != 'Cancelled' &&
+            status != 'Rejected' &&
+            status != 'Completed';
+
+    final displayedStatus = progress == 'Completed'
+        ? 'Completed'
+        : isAutoCancelled
+        ? 'Cancelled'
+        : status;
+
+    final date = formatDate(
+      booking['appointment_date'].toString(),
+    );
     final problem = booking['problem_description'] ?? '';
     final rejectionReason = booking['rejection_reason'] ?? '';
     final total = getTotalPrice(booking);
@@ -467,7 +607,10 @@ class _BookServicePageState extends State<BookServicePage> {
                   buildDetailBox('Plate Number', vehicle['plate_number'] ?? ''),
                   buildDetailBox('Car Model', vehicle['car_model'] ?? ''),
                   buildDetailBox('Appointment Date', date),
-                  buildDetailBox('Booking Status', status),
+                  buildDetailBox(
+                    'Booking Status',
+                    displayedStatus,
+                  ),
                   if (status == 'Rejected' &&
                       rejectionReason.toString().isNotEmpty)
                     buildRejectReasonBox(rejectionReason.toString()),
@@ -618,12 +761,23 @@ class _BookServicePageState extends State<BookServicePage> {
                             ),
                             TextButton(
                               onPressed: () async {
+                                final now = DateTime.now();
+                                final minimumDate = DateTime(
+                                  now.year,
+                                  now.month,
+                                  now.day,
+                                ).add(
+                                  const Duration(days: 3),
+                                );
+
                                 final picked = await showDatePicker(
                                   context: context,
                                   initialDate: selectedDate,
-                                  firstDate: DateTime.now(),
-                                  lastDate: DateTime.now().add(
-                                    const Duration(days: 365),
+                                  firstDate: minimumDate,
+                                  lastDate: DateTime(
+                                    now.year + 1,
+                                    now.month,
+                                    now.day,
                                   ),
                                 );
 
@@ -917,6 +1071,16 @@ class _BookServicePageState extends State<BookServicePage> {
           setState(() {
             selectedFilter = title;
           });
+
+          if (scrollController.hasClients) {
+            scrollController.animateTo(
+              0,
+              duration: const Duration(
+                milliseconds: 350,
+              ),
+              curve: Curves.easeOut,
+            );
+          }
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
@@ -1028,7 +1192,11 @@ class _BookServicePageState extends State<BookServicePage> {
         status != 'Cancelled' &&
         status != 'Rejected' &&
         status != 'Completed';
-
+    final displayedStatus = progress == 'Completed'
+        ? 'Completed'
+        : isAutoCancelled
+        ? 'Cancelled'
+        : status;
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -1105,17 +1273,17 @@ class _BookServicePageState extends State<BookServicePage> {
                       vertical: 7,
                     ),
                     decoration: BoxDecoration(
-                      color: isAutoCancelled
-                          ? Colors.red.shade50
-                          : getStatusBackgroundColor(status),
+                      color: getStatusBackgroundColor(
+                        displayedStatus,
+                      ),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      isAutoCancelled ? 'Cancelled' : status,
+                      displayedStatus,
                       style: TextStyle(
-                        color: isAutoCancelled
-                            ? Colors.red
-                            : getStatusColor(status),
+                        color: getStatusColor(
+                          displayedStatus,
+                        ),
                         fontWeight: FontWeight.bold,
                         fontSize: 11,
                       ),
@@ -1212,6 +1380,12 @@ class _BookServicePageState extends State<BookServicePage> {
   }
 
   @override
+  void dispose() {
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final displayBookings = filteredBookings;
 
@@ -1231,102 +1405,165 @@ class _BookServicePageState extends State<BookServicePage> {
         ],
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-            decoration: const BoxDecoration(
-              color: Color(0xFF339BFF),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(26),
-                bottomRight: Radius.circular(26),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'My Service Bookings',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
+          : RefreshIndicator(
+        onRefresh: loadBookings,
+        child: CustomScrollView(
+          controller: scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  16,
+                  16,
+                  20,
+                ),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF339BFF),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(26),
+                    bottomRight: Radius.circular(26),
                   ),
                 ),
-                const SizedBox(height: 6),
-                const Text(
-                  'View and manage your workshop appointments',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    buildSummaryCard(
-                      icon: Icons.upcoming,
-                      title: 'Upcoming',
-                      value: '${getStatusCount('Upcoming')}',
+                    const Text(
+                      'My Service Bookings',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    const SizedBox(width: 12),
-                    buildSummaryCard(
-                      icon: Icons.check_circle,
-                      title: 'Completed',
-                      value: '${getStatusCount('Completed')}',
+
+                    const SizedBox(height: 6),
+
+                    const Text(
+                      'View and manage your workshop appointments',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        buildSummaryCard(
+                          icon: Icons.upcoming,
+                          title: 'Upcoming',
+                          value: '${getStatusCount('Upcoming')}',
+                        ),
+                        const SizedBox(width: 12),
+                        buildSummaryCard(
+                          icon: Icons.check_circle,
+                          title: 'Completed',
+                          value: '${getStatusCount('Completed')}',
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                buildFilterButton('Upcoming'),
-                const SizedBox(width: 10),
-                buildFilterButton('Completed'),
-                const SizedBox(width: 10),
-                buildFilterButton('Cancelled'),
-              ],
+
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 16),
             ),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: displayBookings.isEmpty
-                ? Center(
-              child: Text(
-                'No $selectedFilter bookings.',
-                style: const TextStyle(
-                  fontSize: 16,
-                  color: Colors.black54,
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+                child: Row(
+                  children: [
+                    buildFilterButton('Upcoming'),
+                    const SizedBox(width: 10),
+                    buildFilterButton('Completed'),
+                    const SizedBox(width: 10),
+                    buildFilterButton('Cancelled'),
+                  ],
                 ),
               ),
-            )
-                : RefreshIndicator(
-              onRefresh: loadBookings,
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: displayBookings.length,
-                itemBuilder: (context, index) {
-                  final booking = displayBookings[index];
-                  return buildBookingCard(booking);
-                },
+            ),
+
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 16),
+            ),
+
+            if (displayBookings.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Text(
+                    'No $selectedFilter bookings.',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: Colors.black54,
+                    ),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  120,
+                ),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                      final booking = displayBookings[index];
+
+                      return buildBookingCard(booking);
+                    },
+                    childCount: displayBookings.length,
+                  ),
+                ),
               ),
+          ],
+        ),
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (showBackToTop)
+            FloatingActionButton.small(
+              heroTag: 'bookServiceBackToTop',
+              backgroundColor: const Color(0xFF339BFF),
+              foregroundColor: Colors.white,
+              elevation: 4,
+              onPressed: scrollToTop,
+              child: const Icon(
+                Icons.keyboard_arrow_up,
+              ),
+            ),
+
+          if (showBackToTop)
+            const SizedBox(height: 12),
+
+          FloatingActionButton.extended(
+            heroTag: 'bookServiceNewBooking',
+            backgroundColor: const Color(0xFF339BFF),
+            foregroundColor: Colors.white,
+            onPressed: goToCalendarPage,
+            icon: const Icon(Icons.add),
+            label: const Text(
+              'New Booking',
             ),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF339BFF),
-        foregroundColor: Colors.white,
-        onPressed: goToCalendarPage,
-        icon: const Icon(Icons.add),
-        label: const Text('New Booking'),
       ),
     );
   }

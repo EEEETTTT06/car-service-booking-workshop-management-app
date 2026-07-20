@@ -13,7 +13,10 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
   String selectedStatus = 'Sent';
   String searchText = '';
   bool isLoading = false;
+  bool isUpdatingQuotation = false;
+
   final ScrollController scrollController = ScrollController();
+  final TextEditingController searchController = TextEditingController();
   bool showBackToTop = false;
   Map<String, dynamic>? currentCustomer;
   List<Map<String, dynamic>> quotations = [];
@@ -25,13 +28,15 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
     loadQuotations();
 
     scrollController.addListener(() {
-      if (scrollController.offset > 180 && !showBackToTop) {
+      if (!mounted) return;
+
+      final shouldShow =
+          scrollController.hasClients &&
+              scrollController.offset > 180;
+
+      if (shouldShow != showBackToTop) {
         setState(() {
-          showBackToTop = true;
-        });
-      } else if (scrollController.offset <= 180 && showBackToTop) {
-        setState(() {
-          showBackToTop = false;
+          showBackToTop = shouldShow;
         });
       }
     });
@@ -40,10 +45,13 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
   @override
   void dispose() {
     scrollController.dispose();
+    searchController.dispose();
     super.dispose();
   }
 
   void scrollToTop() {
+    if (!scrollController.hasClients) return;
+
     scrollController.animateTo(
       0,
       duration: const Duration(milliseconds: 450),
@@ -166,6 +174,7 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
           'admin_id': admin['admin_id'],
           'title': title,
           'message': body,
+          'notification_type': 'quotation',
           'is_read': false,
         });
       }
@@ -200,15 +209,55 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
     required Map<String, dynamic> quotation,
     required String status,
   }) async {
+    if (isUpdatingQuotation) return;
+
+    setState(() {
+      isUpdatingQuotation = true;
+    });
+
     try {
-      await supabase.from('quotations').update({
+      final updatedQuotation = await supabase
+          .from('quotations')
+          .update({
         'status': status,
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('quotation_id', quotation['quotation_id']);
+      })
+          .eq(
+        'quotation_id',
+        quotation['quotation_id'],
+      )
+          .eq(
+        'status',
+        'Sent',
+      )
+          .select('quotation_id')
+          .maybeSingle();
+
+      if (updatedQuotation == null) {
+        await loadQuotations();
+
+        showMessage(
+          'This quotation has already been processed.',
+        );
+
+        return;
+      }
+
+      final vehicle = quotation['vehicles'] ?? {};
+      final plate =
+          vehicle['plate_number'] ?? 'your vehicle';
 
       if (status == 'Cancelled') {
-        final vehicle = quotation['vehicles'] ?? {};
-        final plate = vehicle['plate_number'] ?? 'your vehicle';
+        await supabase.from('pending_services').update({
+          'quotation_id': null,
+          'status': 'Waiting Fix',
+          'note':
+          'Customer rejected the quotation. Create a new quotation if needed.',
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq(
+          'quotation_id',
+          quotation['quotation_id'],
+        );
 
         await supabase.from('notifications').insert({
           'customer_id': quotation['customer_id'],
@@ -218,6 +267,7 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
           'title': 'Quotation Rejected',
           'message':
           'You rejected the quotation for $plate. The workshop will not proceed with this quotation.',
+          'notification_type': 'quotation',
           'is_read': false,
         });
       }
@@ -229,19 +279,34 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
 
       await loadQuotations();
 
-      if (mounted) {
-        setState(() => selectedStatus = status);
-      }
+      if (!mounted) return;
+
+      setState(() {
+        selectedStatus = status;
+      });
 
       showMessage(
         status == 'Confirmed'
             ? 'Quotation confirmed. Please bring your vehicle to the workshop when ready.'
-            : 'Quotation rejected. Workshop will not proceed with this quotation.',
+            : 'Quotation rejected. The workshop may prepare a new quotation if necessary.',
       );
     } catch (error, stackTrace) {
-      print('PENDING SERVICE ERROR: $error');
-      print(stackTrace);
-      showMessage('Failed to update quotation: $error');
+      debugPrint(
+        'Update quotation error: $error',
+      );
+      debugPrintStack(
+        stackTrace: stackTrace,
+      );
+
+      showMessage(
+        'Failed to update quotation: $error',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isUpdatingQuotation = false;
+        });
+      }
     }
   }
 
@@ -483,20 +548,38 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
     return Expanded(
       child: GestureDetector(
         onTap: () {
-          setState(() => selectedStatus = status);
+          if (selectedStatus == status) return;
+
+          setState(() {
+            selectedStatus = status;
+          });
+
+          if (scrollController.hasClients) {
+            scrollController.animateTo(
+              0,
+              duration: const Duration(
+                milliseconds: 350,
+              ),
+              curve: Curves.easeOut,
+            );
+          }
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           height: 45,
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF339BFF) : Colors.white,
+            color: isSelected
+                ? const Color(0xFF339BFF)
+                : Colors.white,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Center(
             child: Text(
               status,
               style: TextStyle(
-                color: isSelected ? Colors.white : const Color(0xFF339BFF),
+                color: isSelected
+                    ? Colors.white
+                    : const Color(0xFF339BFF),
                 fontWeight: FontWeight.bold,
                 fontSize: 12,
               ),
@@ -773,6 +856,7 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
                     const SizedBox(height: 16),
 
                     TextField(
+                      controller: searchController,
                       onChanged: (value) {
                         setState(() {
                           searchText = value;
@@ -782,6 +866,22 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
                         hintText:
                         'Search by plate number or car model',
                         prefixIcon: const Icon(Icons.search),
+
+                        suffixIcon: searchText.isNotEmpty
+                            ? IconButton(
+                          onPressed: () {
+                            searchController.clear();
+
+                            setState(() {
+                              searchText = '';
+                            });
+                          },
+                          icon: const Icon(
+                            Icons.clear,
+                          ),
+                        )
+                            : null,
+
                         filled: true,
                         fillColor: Colors.white,
                         contentPadding:

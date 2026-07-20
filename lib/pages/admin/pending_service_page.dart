@@ -33,10 +33,16 @@ class _PendingServicePageState extends State<PendingServicePage> {
     fetchPendingServices();
 
     scrollController.addListener(() {
-      if (scrollController.offset > 350 && !showBackToTop) {
-        setState(() => showBackToTop = true);
-      } else if (scrollController.offset <= 350 && showBackToTop) {
-        setState(() => showBackToTop = false);
+      if (!mounted) return;
+
+      final shouldShow =
+          scrollController.hasClients &&
+              scrollController.offset > 350;
+
+      if (shouldShow != showBackToTop) {
+        setState(() {
+          showBackToTop = shouldShow;
+        });
       }
     });
   }
@@ -48,6 +54,8 @@ class _PendingServicePageState extends State<PendingServicePage> {
   }
 
   void scrollToTop() {
+    if (!scrollController.hasClients) return;
+
     scrollController.animateTo(
       0,
       duration: const Duration(milliseconds: 450),
@@ -289,21 +297,66 @@ class _PendingServicePageState extends State<PendingServicePage> {
       String newStatus,
       ) async {
     try {
+      final currentStatus =
+          service['status']?.toString() ??
+              'Waiting Fix';
+
+      final quotationId =
+      service['quotation_id']?.toString();
+
+      final quotation = service['quotations'];
+
+      if (currentStatus == 'Completed') {
+        showMessage(
+          'A completed service cannot be changed.',
+        );
+        return;
+      }
+
+      if (currentStatus == 'Waiting Fix' &&
+          newStatus == 'Completed') {
+        showMessage(
+          'Please change the service to In Progress before completing it.',
+        );
+        return;
+      }
+
+      if ((newStatus == 'In Progress' ||
+          newStatus == 'Completed') &&
+          quotationId != null &&
+          quotationId.isNotEmpty) {
+        if (quotation == null ||
+            quotation['status'] != 'Confirmed') {
+          showMessage(
+            'The customer must confirm the quotation before service can begin.',
+          );
+          return;
+        }
+      }
+
       final vehicle = service['vehicles'] ?? {};
-      final plate = vehicle['plate_number'] ?? 'your vehicle';
+      final plate =
+          vehicle['plate_number'] ?? 'your vehicle';
+
       final customerId = service['customer_id'];
 
       final title = newStatus == 'Completed'
           ? 'Vehicle Service Completed'
           : 'Vehicle Status Updated';
 
-      final message = getNotificationMessage(newStatus, plate);
+      final message =
+      getNotificationMessage(
+        newStatus,
+        plate,
+      );
 
       bool automaticRecordCreated = false;
 
       if (newStatus == 'Completed') {
         automaticRecordCreated =
-        await createAutomaticServiceRecord(service);
+        await createAutomaticServiceRecord(
+          service,
+        );
       }
 
       if (service['booking_id'] != null &&
@@ -327,7 +380,8 @@ class _PendingServicePageState extends State<PendingServicePage> {
       } else {
         await supabase.from('pending_services').update({
           'status': newStatus,
-          'updated_at': DateTime.now().toIso8601String(),
+          'updated_at':
+          DateTime.now().toIso8601String(),
         }).eq(
           'pending_id',
           service['pending_id'],
@@ -335,30 +389,35 @@ class _PendingServicePageState extends State<PendingServicePage> {
       }
 
       if (customerId != null) {
+        final notificationTitle =
+        automaticRecordCreated
+            ? 'Service Record Available'
+            : title;
+
+        final notificationMessage =
+        automaticRecordCreated
+            ? 'The service for vehicle $plate has been completed. Your service record is now available.'
+            : message;
+
         await supabase.from('notifications').insert({
           'customer_id': customerId,
           'vehicle_id': service['vehicle_id'],
           'booking_id': service['booking_id'],
           'quotation_id': service['quotation_id'],
           'pending_id':
-          automaticRecordCreated ? null : service['pending_id'],
-          'title': automaticRecordCreated
-              ? 'Service Record Available'
-              : title,
-          'message': automaticRecordCreated
-              ? 'The service for vehicle $plate has been completed. Your service record is now available.'
-              : message,
+          automaticRecordCreated
+              ? null
+              : service['pending_id'],
+          'title': notificationTitle,
+          'message': notificationMessage,
+          'notification_type': 'service',
           'is_read': false,
         });
 
         await sendFcmPushNotification(
-          customerId: customerId,
-          title: automaticRecordCreated
-              ? 'Service Record Available'
-              : title,
-          message: automaticRecordCreated
-              ? 'The service for vehicle $plate has been completed. Your service record is now available.'
-              : message,
+          customerId: customerId.toString(),
+          title: notificationTitle,
+          message: notificationMessage,
         );
       }
 
@@ -373,25 +432,81 @@ class _PendingServicePageState extends State<PendingServicePage> {
           'Walk-in service completed. Create the service record manually from Service Records.',
         );
       } else {
-        showMessage('Service status updated to $newStatus.');
+        showMessage(
+          'Service status updated to $newStatus.',
+        );
       }
     } catch (error) {
-      showMessage('Failed to update status: $error');
+      showMessage(
+        'Failed to update status: $error',
+      );
     }
   }
 
-  Future<void> deletePendingService(String pendingId) async {
+  Future<void> deletePendingService(
+      Map<String, dynamic> service,
+      ) async {
     try {
+      final quotationId =
+      service['quotation_id']?.toString();
+
+      final status =
+          service['status']?.toString() ??
+              'Waiting Fix';
+
+      if (quotationId != null &&
+          quotationId.isNotEmpty) {
+        showMessage(
+          'This pending service is linked to a quotation and cannot be deleted.',
+        );
+        return;
+      }
+
+      if (status == 'In Progress') {
+        showMessage(
+          'An in-progress service cannot be deleted.',
+        );
+        return;
+      }
+
+      if (status == 'Completed') {
+        showMessage(
+          'Create the service record before removing this completed service.',
+        );
+        return;
+      }
+
+      final bookingId = service['booking_id'];
+
       await supabase
           .from('pending_services')
           .delete()
-          .eq('pending_id', pendingId);
+          .eq(
+        'pending_id',
+        service['pending_id'],
+      );
+
+      if (bookingId != null) {
+        await supabase.from('bookings').update({
+          'status': 'Booked',
+        }).eq(
+          'booking_id',
+          bookingId,
+        ).eq(
+          'status',
+          'Arrived',
+        );
+      }
 
       await fetchPendingServices();
 
-      showMessage('Pending service deleted successfully.');
+      showMessage(
+        'Pending service deleted successfully.',
+      );
     } catch (error) {
-      showMessage('Failed to delete pending service: $error');
+      showMessage(
+        'Failed to delete pending service: $error',
+      );
     }
   }
 
@@ -771,13 +886,35 @@ class _PendingServicePageState extends State<PendingServicePage> {
                     ),
                   ),
                   IconButton(
+                    tooltip: 'Delete Pending Service',
                     icon: const Icon(
                       Icons.delete_outline,
                       color: Colors.red,
                     ),
                     onPressed: () {
+                      if (hasQuotation) {
+                        showMessage(
+                          'Cancel or unlink the quotation before deleting this pending service.',
+                        );
+                        return;
+                      }
+
+                      if (status == 'In Progress') {
+                        showMessage(
+                          'An in-progress service cannot be deleted.',
+                        );
+                        return;
+                      }
+
+                      if (status == 'Completed') {
+                        showMessage(
+                          'Create the service record before removing this completed service.',
+                        );
+                        return;
+                      }
+
                       showDeletePendingServiceDialog(
-                        service['pending_id'],
+                        service,
                       );
                     },
                   ),
@@ -895,12 +1032,16 @@ class _PendingServicePageState extends State<PendingServicePage> {
     );
   }
 
-  void showDeletePendingServiceDialog(String pendingId) {
+  void showDeletePendingServiceDialog(
+      Map<String, dynamic> service,
+      ) {
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Delete Pending Service'),
+          title: const Text(
+            'Delete Pending Service',
+          ),
           content: const Text(
             'Are you sure you want to delete this pending service record?',
           ),
@@ -909,7 +1050,8 @@ class _PendingServicePageState extends State<PendingServicePage> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () =>
+                  Navigator.pop(context),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
@@ -919,7 +1061,10 @@ class _PendingServicePageState extends State<PendingServicePage> {
               ),
               onPressed: () async {
                 Navigator.pop(context);
-                await deletePendingService(pendingId);
+
+                await deletePendingService(
+                  service,
+                );
               },
               child: const Text('Delete'),
             ),

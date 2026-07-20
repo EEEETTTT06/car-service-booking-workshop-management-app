@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_service.dart';
+import '../common/notification_bell.dart';
 
 class ChooseServiceTypePage extends StatefulWidget {
   final String selectedDate;
@@ -18,6 +19,8 @@ class ChooseServiceTypePage extends StatefulWidget {
 class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
   bool isLoading = false;
   bool isSubmitting = false;
+  final ScrollController scrollController = ScrollController();
+  bool showBackToTop = false;
 
   Map<String, dynamic>? currentCustomer;
   Map<String, dynamic>? selectedVehicle;
@@ -31,7 +34,30 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
   @override
   void initState() {
     super.initState();
+
     loadData();
+
+    scrollController.addListener(() {
+      if (!mounted) return;
+
+      final shouldShow = scrollController.offset > 180;
+
+      if (shouldShow != showBackToTop) {
+        setState(() {
+          showBackToTop = shouldShow;
+        });
+      }
+    });
+  }
+
+  void scrollToTop() {
+    if (!scrollController.hasClients) return;
+
+    scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> loadData() async {
@@ -248,6 +274,30 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
     setState(() => isSubmitting = true);
 
     try {
+      final existingBooking = await supabase
+          .from('bookings')
+          .select('booking_id')
+          .eq(
+        'vehicle_id',
+        selectedVehicle!['vehicle_id'],
+      )
+          .eq(
+        'appointment_date',
+        sqlDate,
+      )
+          .neq(
+        'status',
+        'Cancelled',
+      )
+          .limit(1);
+
+      if (existingBooking.isNotEmpty) {
+        showMessage(
+          'This vehicle already has a booking on the selected date.',
+        );
+        return;
+      }
+
       final booking = await supabase.from('bookings').insert({
         'customer_id': currentCustomer!['customer_id'],
         'vehicle_id': selectedVehicle!['vehicle_id'],
@@ -280,10 +330,20 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
 
       if (!mounted) return;
 
-      Navigator.pop(context);
-      Navigator.pop(context);
+      final navigator = Navigator.of(context);
+      final messenger = ScaffoldMessenger.of(context);
 
-      showMessage('Booking confirmed successfully.');
+      navigator.pop();
+      navigator.pop();
+
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Booking confirmed successfully.',
+          ),
+        ),
+      );
     } catch (error) {
       showMessage('Failed to confirm booking: $error');
     } finally {
@@ -646,6 +706,7 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
   @override
   void dispose() {
     problemController.dispose();
+    scrollController.dispose();
     super.dispose();
   }
 
@@ -661,153 +722,240 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
         backgroundColor: const Color(0xFF339BFF),
         foregroundColor: Colors.white,
         elevation: 0,
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-            decoration: const BoxDecoration(
-              color: Color(0xFF339BFF),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(26),
-                bottomRight: Radius.circular(26),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Select Your Service',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Booking Date: ${widget.selectedDate}',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    buildSummaryCard(
-                      icon: Icons.build,
-                      title: 'Available',
-                      value: '$availableCount',
-                    ),
-                    const SizedBox(width: 12),
-                    buildSummaryCard(
-                      icon: Icons.check_circle,
-                      title: 'Selected',
-                      value: '${selectedServices.length}',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  value: selectedVehicle?['vehicle_id'],
-                  decoration: InputDecoration(
-                    labelText: 'Select Vehicle',
-                    prefixIcon: const Icon(Icons.directions_car),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  items: vehicles.map((vehicle) {
-                    return DropdownMenuItem<String>(
-                      value: vehicle['vehicle_id'],
-                      child: Text(
-                        '${vehicle['plate_number']} - ${vehicle['car_model']}',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      selectedVehicle = vehicles.firstWhere(
-                            (vehicle) => vehicle['vehicle_id'] == value,
-                      );
-                    });
-                  },
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: services.isEmpty
-                ? const Center(child: Text('No services available.'))
-                : ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: [
-                buildProblemDescriptionCard(),
-                ...services.map((service) {
-                  return buildServiceCard(service);
-                }),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFD7E5FA),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.06),
-                  blurRadius: 10,
-                  offset: const Offset(0, -4),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    'Estimated Total: RM ${totalPrice.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 17,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF339BFF),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    onPressed:
-                    isSubmitting ? null : showConfirmBookingDialog,
-                    icon: const Icon(Icons.calendar_month),
-                    label: Text(
-                      isSubmitting ? 'Booking...' : 'Book Service',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+        actions: const [
+          NotificationBell(
+            isAdmin: false,
           ),
         ],
       ),
+      body: isLoading
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
+          : RefreshIndicator(
+        onRefresh: loadData,
+        child: CustomScrollView(
+          controller: scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  16,
+                  16,
+                  20,
+                ),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF339BFF),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(26),
+                    bottomRight: Radius.circular(26),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Select Your Service',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    const SizedBox(height: 6),
+
+                    Text(
+                      'Booking Date: ${widget.selectedDate}',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        buildSummaryCard(
+                          icon: Icons.build,
+                          title: 'Available',
+                          value: '$availableCount',
+                        ),
+                        const SizedBox(width: 12),
+                        buildSummaryCard(
+                          icon: Icons.check_circle,
+                          title: 'Selected',
+                          value: '${selectedServices.length}',
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    DropdownButtonFormField<String>(
+                      value: selectedVehicle?['vehicle_id'],
+                      decoration: InputDecoration(
+                        labelText: 'Select Vehicle',
+                        prefixIcon: const Icon(
+                          Icons.directions_car,
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      items: vehicles.map((vehicle) {
+                        return DropdownMenuItem<String>(
+                          value: vehicle['vehicle_id'],
+                          child: Text(
+                            '${vehicle['plate_number']} - '
+                                '${vehicle['car_model']}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          selectedVehicle = vehicles.firstWhere(
+                                (vehicle) =>
+                            vehicle['vehicle_id'] == value,
+                          );
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 16),
+            ),
+
+            if (services.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Text(
+                    'No services available.',
+                    style: TextStyle(
+                      color: Colors.black54,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate(
+                    [
+                      buildProblemDescriptionCard(),
+                      ...services.map(
+                            (service) => buildServiceCard(service),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            if (services.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.fromLTRB(
+                    16,
+                    16,
+                    16,
+                    20,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD7E5FA),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.06),
+                        blurRadius: 10,
+                        offset: const Offset(0, -4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          'Estimated Total: '
+                              'RM ${totalPrice.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 17,
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor:
+                            const Color(0xFF339BFF),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                              BorderRadius.circular(16),
+                            ),
+                          ),
+                          onPressed: isSubmitting
+                              ? null
+                              : showConfirmBookingDialog,
+                          icon: const Icon(
+                            Icons.calendar_month,
+                          ),
+                          label: Text(
+                            isSubmitting
+                                ? 'Booking...'
+                                : 'Book Service',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 90),
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: showBackToTop
+          ? FloatingActionButton.small(
+        heroTag: 'chooseServiceTypeBackToTop',
+        backgroundColor: const Color(0xFF339BFF),
+        foregroundColor: Colors.white,
+        elevation: 4,
+        onPressed: scrollToTop,
+        child: const Icon(
+          Icons.keyboard_arrow_up,
+        ),
+      )
+          : null,
     );
   }
 }
