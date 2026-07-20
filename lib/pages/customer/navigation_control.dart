@@ -1,0 +1,465 @@
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../auth/login_page.dart';
+
+import 'customer_dashboard_content.dart';
+import 'my_vehicles_page.dart';
+import 'book_service_page.dart';
+import 'customer_quotations_page.dart';
+import 'service_records_page.dart';
+import 'customer_edit_profile_page.dart';
+import 'customer_settings_page.dart';
+import 'notification_page.dart';
+
+class NavigationControl extends StatefulWidget {
+  const NavigationControl({super.key});
+
+  @override
+  State<NavigationControl> createState() => _NavigationControlState();
+}
+
+class _NavigationControlState extends State<NavigationControl> {
+  final supabase = Supabase.instance.client;
+
+  int currentIndex = 0;
+  bool notificationOn = true;
+  bool isLoadingProfile = false;
+
+  Map<String, String> customerProfile = {
+    'name': 'Customer',
+    'email': '',
+    'phone': '',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    loadCustomerProfile();
+  }
+
+  Future<void> loadCustomerProfile() async {
+    setState(() => isLoadingProfile = true);
+
+    try {
+      final user = supabase.auth.currentUser;
+
+      if (user == null) return;
+
+      final response = await supabase
+          .from('customers')
+          .select('name, email, phone')
+          .eq('auth_user_id', user.id)
+          .maybeSingle();
+
+      if (response != null) {
+        setState(() {
+          customerProfile = {
+            'name': (response['name'] ?? 'Customer').toString(),
+            'email': (response['email'] ?? user.email ?? '').toString(),
+            'phone': (response['phone'] ?? '').toString(),
+          };
+        });
+      }
+    } catch (error) {
+      debugPrint('Failed to load customer profile: $error');
+    } finally {
+      if (mounted) setState(() => isLoadingProfile = false);
+    }
+  }
+
+  void changePage(int index) {
+    setState(() {
+      currentIndex = index;
+    });
+  }
+
+  Future<void> logoutCustomer() async {
+    await supabase.auth.signOut();
+
+    if (!mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+    );
+  }
+
+  void showLogoutConfirmDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Confirm Logout'),
+            ],
+          ),
+          content: const Text(
+            'Are you sure you want to logout?\n\nYou will need to login again to access your account.',
+          ),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(20)),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                await logoutCustomer();
+              },
+              child: const Text('Logout'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void showCustomerMenu() {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Customer Menu',
+      transitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: 290,
+              height: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.only(
+                  topRight: Radius.circular(28),
+                  bottomRight: Radius.circular(28),
+                ),
+              ),
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD7E5FA),
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: Column(
+                        children: [
+                          const CircleAvatar(
+                            radius: 42,
+                            backgroundColor: Color(0xFF339BFF),
+                            child: Icon(
+                              Icons.person,
+                              size: 48,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            isLoadingProfile
+                                ? 'Loading...'
+                                : customerProfile['name']!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            customerProfile['email']!.isEmpty
+                                ? 'No email'
+                                : customerProfile['email']!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            customerProfile['phone']!.isEmpty
+                                ? 'No phone number'
+                                : customerProfile['phone']!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.black45,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 7,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'Customer Account',
+                              style: TextStyle(
+                                color: Color(0xFF339BFF),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    sidebarItem(
+                      icon: Icons.edit,
+                      title: 'Edit Profile',
+                      subtitle: 'Update your account information',
+                      onTap: () async {
+                        Navigator.pop(context);
+
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CustomerEditProfilePage(
+                              customerProfile: customerProfile,
+                              onProfileUpdated: (updatedProfile) {
+                                setState(() {
+                                  customerProfile = updatedProfile;
+                                });
+                              },
+                            ),
+                          ),
+                        );
+
+                        await loadCustomerProfile();
+                      },
+                    ),
+
+                    sidebarItem(
+                      icon: Icons.notifications,
+                      title: 'Notifications',
+                      subtitle: 'View all notification messages',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CustomerNotificationPage(),
+                          ),
+                        );
+                      },
+                    ),
+
+                    sidebarItem(
+                      icon: Icons.settings,
+                      title: 'Settings',
+                      subtitle: 'Notification preferences',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CustomerSettingsPage(
+                              notificationOn: notificationOn,
+                              onNotificationChanged: (value) {
+                                setState(() {
+                                  notificationOn = value;
+                                });
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+
+                    const Spacer(),
+
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          showLogoutConfirmDialog();
+                        },
+                        icon: const Icon(Icons.logout),
+                        label: const Text(
+                          'Logout',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(-1, 0),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
+        );
+      },
+    );
+  }
+
+  Widget sidebarItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ListTile(
+        onTap: onTap,
+        leading: CircleAvatar(
+          backgroundColor: const Color(0xFFD7E5FA),
+          child: Icon(icon, color: const Color(0xFF339BFF)),
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: const TextStyle(fontSize: 12),
+        ),
+        trailing: const Icon(Icons.arrow_forward_ios, size: 15),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      CustomerDashboardContent(onNavigate: changePage),
+      const MyVehiclesPage(),
+      const BookServicePage(),
+      const CustomerQuotationPage(),
+      const ServiceRecordsPage(),
+    ];
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          pages[currentIndex],
+          Positioned(
+            left: 16,
+            top: 28,
+            child: SizedBox(
+              width: 42,
+              height: 42,
+              child: FloatingActionButton(
+                heroTag: 'customerProfileButton',
+                elevation: 4,
+                backgroundColor: Colors.white,
+                shape: const CircleBorder(),
+                onPressed: showCustomerMenu,
+                child: const Icon(
+                  Icons.person,
+                  size: 24,
+                  color: Color(0xFF339BFF),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 12,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: BottomNavigationBar(
+          currentIndex: currentIndex,
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: Colors.white,
+          selectedItemColor: const Color(0xFF339BFF),
+          unselectedItemColor: Colors.grey,
+          selectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+          unselectedLabelStyle: const TextStyle(fontSize: 11),
+          elevation: 0,
+          onTap: changePage,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_rounded),
+              label: 'Home',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.directions_car_rounded),
+              label: 'Vehicles',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.calendar_month_rounded),
+              label: 'Booking',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.receipt_long_rounded),
+              label: 'Quotation',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.history_rounded),
+              label: 'Records',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

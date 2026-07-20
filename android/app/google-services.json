@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "880609682091",
+    "project_id": "car-service-app-c312c",
+    "storage_bucket": "car-service-app-c312c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:880609682091:android:7ce72157ac524647fe4dee",
+        "android_client_info": {
+          "package_name": "com.example.car_booking_management_system"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC1aVO0xkwNddFL79-apklumkmnAPkaS5I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
