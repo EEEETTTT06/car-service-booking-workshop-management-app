@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../auth/login_page.dart';
+import '../common/notification_bell.dart';
+import 'customer_edit_profile_page.dart';
+import 'customer_settings_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -14,6 +17,9 @@ class _ProfilePageState extends State<ProfilePage> {
   final supabase = Supabase.instance.client;
 
   bool isLoading = true;
+  final ScrollController scrollController = ScrollController();
+  bool showBackToTop = false;
+  bool notificationOn = true;
 
   String customerName = 'Customer';
   String customerEmail = '';
@@ -30,7 +36,90 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
+
     loadProfileData();
+
+    scrollController.addListener(() {
+      if (!mounted) return;
+
+      final shouldShow =
+          scrollController.offset > 180;
+
+      if (shouldShow != showBackToTop) {
+        setState(() {
+          showBackToTop = shouldShow;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  void scrollToTop() {
+    if (!scrollController.hasClients) return;
+
+    scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOut,
+    );
+  }
+  Future<void> goToEditProfile() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CustomerEditProfilePage(
+          customerProfile: {
+            'name': customerName,
+            'email': customerEmail,
+            'phone': customerPhone == 'Not Provided'
+                ? ''
+                : customerPhone,
+          },
+          onProfileUpdated: (updatedProfile) {
+            if (!mounted) return;
+
+            setState(() {
+              customerName =
+                  updatedProfile['name'] ?? customerName;
+              customerEmail =
+                  updatedProfile['email'] ?? customerEmail;
+              customerPhone =
+                  updatedProfile['phone'] ?? customerPhone;
+            });
+          },
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    await loadProfileData();
+  }
+  Future<void> goToSettings() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CustomerSettingsPage(
+          notificationOn: notificationOn,
+          onNotificationChanged: (value) {
+            if (!mounted) return;
+
+            setState(() {
+              notificationOn = value;
+            });
+          },
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    await loadProfileData();
   }
 
   Future<void> loadProfileData() async {
@@ -46,14 +135,20 @@ class _ProfilePageState extends State<ProfilePage> {
       final customerResponse = await supabase
           .from('customers')
           .select()
-          .eq('customer_id', user.id)
+          .eq('auth_user_id', user.id)
           .maybeSingle();
+
+      if (customerResponse == null) {
+        throw Exception('Customer profile not found.');
+      }
+
+      final customerId =
+      customerResponse['customer_id'];
 
       final vehiclesResponse = await supabase
           .from('vehicles')
           .select('vehicle_id')
-          .eq('user_id', user.id);
-
+          .eq('customer_id', customerId);
       final workshopResponse = await supabase
           .from('workshop_profile')
           .select()
@@ -63,18 +158,22 @@ class _ProfilePageState extends State<ProfilePage> {
           .from('workshop_photos')
           .select()
           .order('display_order', ascending: true);
+      if (!mounted) return;
 
       setState(() {
-        customerName = (customerResponse?['name'] ??
+        customerName = (customerResponse['name'] ??
             user.userMetadata?['name'] ??
             'Customer')
             .toString();
 
-        customerEmail = (customerResponse?['email'] ?? user.email ?? '')
+        customerEmail = (customerResponse['email'] ?? user.email ?? '')
             .toString();
 
         customerPhone =
-            (customerResponse?['phone'] ?? 'Not Provided').toString();
+            (customerResponse['phone'] ?? 'Not Provided').toString();
+
+        notificationOn =
+            customerResponse['notification_enabled'] ?? true;
 
         totalVehicles = vehiclesResponse.length;
 
@@ -569,12 +668,18 @@ class _ProfilePageState extends State<ProfilePage> {
         backgroundColor: const Color(0xFF339BFF),
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: const [
+          NotificationBell(
+            isAdmin: false,
+          ),
+        ],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
         onRefresh: loadProfileData,
         child: SingleChildScrollView(
+          controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
           child: Column(
             children: [
@@ -643,7 +748,63 @@ class _ProfilePageState extends State<ProfilePage> {
                       title: 'Account Status',
                       subtitle: 'Active Customer',
                     ),
-                    const SizedBox(height: 8),
+
+                    const SizedBox(height: 4),
+
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF339BFF),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        onPressed: goToEditProfile,
+                        icon: const Icon(Icons.edit),
+                        label: const Text(
+                          'Edit Profile',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF339BFF),
+                          side: const BorderSide(
+                            color: Color(0xFF339BFF),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        onPressed: goToSettings,
+                        icon: const Icon(Icons.settings),
+                        label: Text(
+                          notificationOn
+                              ? 'Notification Settings: On'
+                              : 'Notification Settings: Off',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 22),
+
                     const Text(
                       'Workshop Information',
                       style: TextStyle(
@@ -681,6 +842,19 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ),
       ),
+      floatingActionButton: showBackToTop
+          ? FloatingActionButton.small(
+        heroTag: 'customerProfileBackToTop',
+        backgroundColor:
+        const Color(0xFF339BFF),
+        foregroundColor: Colors.white,
+        elevation: 4,
+        onPressed: scrollToTop,
+        child: const Icon(
+          Icons.keyboard_arrow_up,
+        ),
+      )
+          : null,
     );
   }
 }

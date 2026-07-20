@@ -17,7 +17,7 @@ class CustomerSettingsPage extends StatefulWidget {
 
 class _CustomerSettingsPageState extends State<CustomerSettingsPage> {
   late bool notificationOn;
-
+  bool isUpdating = false;
   @override
   void initState() {
     super.initState();
@@ -25,6 +25,12 @@ class _CustomerSettingsPageState extends State<CustomerSettingsPage> {
   }
 
   Future<void> updateNotification(bool value) async {
+    if (isUpdating) return;
+
+    setState(() {
+      isUpdating = true;
+    });
+
     try {
       final user = supabase.auth.currentUser;
 
@@ -36,6 +42,8 @@ class _CustomerSettingsPageState extends State<CustomerSettingsPage> {
         'notification_enabled': value,
       }).eq('auth_user_id', user.id);
 
+      if (!mounted) return;
+
       setState(() {
         notificationOn = value;
       });
@@ -45,16 +53,28 @@ class _CustomerSettingsPageState extends State<CustomerSettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            value ? 'Notification turned on.' : 'Notification turned off.',
+            value
+                ? 'Notifications turned on.'
+                : 'Notifications turned off.',
           ),
         ),
       );
     } catch (error) {
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to update notification setting: $error'),
+          content: Text(
+            'Failed to update notification setting: $error',
+          ),
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isUpdating = false;
+        });
+      }
     }
   }
 
@@ -171,7 +191,9 @@ class _CustomerSettingsPageState extends State<CustomerSettingsPage> {
                       style: const TextStyle(fontSize: 12),
                     ),
                     value: notificationOn,
-                    onChanged: updateNotification,
+                    onChanged: isUpdating
+                        ? null
+                        : updateNotification,
                   ),
                 ),
               ],
