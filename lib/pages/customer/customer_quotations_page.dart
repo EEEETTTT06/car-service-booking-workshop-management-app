@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 
@@ -20,7 +24,8 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
   bool showBackToTop = false;
   Map<String, dynamic>? currentCustomer;
   List<Map<String, dynamic>> quotations = [];
-
+  RealtimeChannel? quotationRealtimeChannel;
+  bool isRealtimeRefreshing = false;
   @override
   void initState() {
     super.initState();
@@ -44,6 +49,14 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
 
   @override
   void dispose() {
+    final channel = quotationRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     searchController.dispose();
     super.dispose();
@@ -65,6 +78,7 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
     try {
       await fetchCurrentCustomer();
       await fetchQuotations();
+      setupRealtimeSubscription();
     } catch (error) {
       showMessage('Failed to load quotations: $error');
     } finally {
@@ -105,6 +119,77 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
         .order('created_at', ascending: false);
 
     quotations = List<Map<String, dynamic>>.from(response);
+  }
+
+  void setupRealtimeSubscription() {
+    if (currentCustomer == null) return;
+
+    // Avoid creating duplicate Realtime listeners.
+    if (quotationRealtimeChannel != null) {
+      return;
+    }
+
+    final customerId =
+    currentCustomer!['customer_id'].toString();
+
+    quotationRealtimeChannel = supabase
+        .channel(
+      'customer-quotations-$customerId',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotations',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'customer_id',
+        value: customerId,
+      ),
+      callback: (payload) {
+        debugPrint(
+          'Customer quotation changed: '
+              '${payload.eventType}',
+        );
+
+        refreshQuotationsFromRealtime();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotation_items',
+      callback: (payload) {
+        debugPrint(
+          'Quotation item changed: '
+              '${payload.eventType}',
+        );
+
+        refreshQuotationsFromRealtime();
+      },
+    )
+        .subscribe();
+  }
+
+  Future<void> refreshQuotationsFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await fetchQuotations();
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (error) {
+      debugPrint(
+        'Realtime quotation refresh failed: $error',
+      );
+    } finally {
+      isRealtimeRefreshing = false;
+    }
   }
 
   List<Map<String, dynamic>> get filteredQuotations {

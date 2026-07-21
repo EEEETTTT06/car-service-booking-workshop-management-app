@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AdminNotificationPage extends StatefulWidget {
   const AdminNotificationPage({super.key});
@@ -11,12 +12,57 @@ class AdminNotificationPage extends StatefulWidget {
 class _AdminNotificationPageState extends State<AdminNotificationPage> {
   bool isLoading = false;
   List<Map<String, dynamic>> notifications = [];
-  static String savedFilter = 'Today';
-  String selectedFilter = savedFilter;
+  static const String adminFilterKey =
+      'admin_notification_filter';
+
+  String selectedFilter = 'Today';
+
+  Future<void> loadSavedFilter() async {
+    try {
+      final preferences =
+      await SharedPreferences.getInstance();
+
+      final savedFilter =
+      preferences.getString(adminFilterKey);
+
+      if (!mounted) return;
+
+      setState(() {
+        selectedFilter =
+        savedFilter == 'All'
+            ? 'All'
+            : 'Today';
+      });
+    } catch (error) {
+      debugPrint(
+        'Failed to load admin notification filter: $error',
+      );
+    }
+  }
+
+  Future<void> saveSelectedFilter(
+      String value,
+      ) async {
+    try {
+      final preferences =
+      await SharedPreferences.getInstance();
+
+      await preferences.setString(
+        adminFilterKey,
+        value,
+      );
+    } catch (error) {
+      debugPrint(
+        'Failed to save admin notification filter: $error',
+      );
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+
+    loadSavedFilter();
     loadNotifications();
   }
 
@@ -510,11 +556,12 @@ class _AdminNotificationPageState extends State<AdminNotificationPage> {
             tooltip: 'Filter Notifications',
             icon: const Icon(Icons.filter_list),
             initialValue: selectedFilter,
-            onSelected: (value) {
+            onSelected: (value) async {
               setState(() {
                 selectedFilter = value;
-                savedFilter = value;
               });
+
+              await saveSelectedFilter(value);
             },
             itemBuilder: (context) => const [
               PopupMenuItem(

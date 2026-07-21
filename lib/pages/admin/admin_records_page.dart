@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 import '../../services/pdf_service.dart';
+import '../../services/customer_notification_service.dart';
 
 class AdminRecordsPage extends StatefulWidget {
   const AdminRecordsPage({super.key});
@@ -25,11 +29,16 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
   List<Map<String, dynamic>> records = [];
   List<Map<String, dynamic>> vehicles = [];
   List<Map<String, dynamic>> completedPendingServices = [];
+  RealtimeChannel? serviceRecordsRealtimeChannel;
+  Timer? realtimeRefreshTimer;
+  bool isRealtimeRefreshing = false;
 
   @override
   void initState() {
     super.initState();
+
     loadData();
+    setupRealtimeSubscription();
 
     scrollController.addListener(() {
       if (!mounted) return;
@@ -48,6 +57,17 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
 
   @override
   void dispose() {
+    realtimeRefreshTimer?.cancel();
+
+    final channel =
+        serviceRecordsRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     searchController.dispose();
     scrollController.dispose();
     super.dispose();
@@ -63,17 +83,45 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     );
   }
 
-  Future<void> loadData() async {
-    setState(() => isLoading = true);
+  Future<void> loadData({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
       await fetchVehicles();
       await fetchCompletedPendingServices();
       await fetchRecords();
+
+      // Prevent DropdownButton error when a car model
+      // is no longer available after Realtime refresh.
+      if (!carModels.contains(selectedModel)) {
+        selectedModel = 'All Car Model';
+      }
+
+      if (mounted) {
+        setState(() {});
+      }
     } catch (error) {
-      showMessage('Failed to load records: $error');
+      if (showLoading) {
+        showMessage(
+          'Failed to load records: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime service record refresh failed: $error',
+        );
+      }
     } finally {
-      if (mounted) setState(() => isLoading = false);
+      if (showLoading && mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -113,6 +161,116 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     ''').order('created_at', ascending: false);
 
     records = List<Map<String, dynamic>>.from(response);
+  }
+
+  void setupRealtimeSubscription() {
+    if (serviceRecordsRealtimeChannel != null) {
+      return;
+    }
+
+    serviceRecordsRealtimeChannel = supabase
+        .channel(
+      'admin-service-records-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'service_records',
+      callback: (payload) {
+        scheduleRealtimeRefresh(
+          'Service record',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'service_record_items',
+      callback: (payload) {
+        scheduleRealtimeRefresh(
+          'Service record item',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'pending_services',
+      callback: (payload) {
+        scheduleRealtimeRefresh(
+          'Completed pending service',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotations',
+      callback: (payload) {
+        scheduleRealtimeRefresh(
+          'Service record quotation',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotation_items',
+      callback: (payload) {
+        scheduleRealtimeRefresh(
+          'Service record quotation item',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'vehicles',
+      callback: (payload) {
+        scheduleRealtimeRefresh(
+          'Service record vehicle',
+          payload.eventType,
+        );
+      },
+    )
+        .subscribe();
+  }
+
+  void scheduleRealtimeRefresh(
+      String source,
+      dynamic eventType,
+      ) {
+    debugPrint(
+      '$source changed: $eventType',
+    );
+
+    realtimeRefreshTimer?.cancel();
+
+    realtimeRefreshTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshServiceRecordsFromRealtime,
+    );
+  }
+
+  Future<void> refreshServiceRecordsFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await loadData(
+        showLoading: false,
+      );
+    } finally {
+      isRealtimeRefreshing = false;
+    }
   }
 
   String displayCustomer(dynamic name) {
@@ -196,46 +354,14 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     required String customerId,
     required String title,
     required String message,
-  }) async {
-    try {
-      final customer = await supabase
-          .from('customers')
-          .select('fcm_token, notification_enabled')
-          .eq(
-        'customer_id',
-        customerId,
-      )
-          .maybeSingle();
-
-      if (customer == null) return;
-
-      if (customer['notification_enabled'] == false) {
-        return;
-      }
-
-      final token =
-      customer['fcm_token']?.toString();
-
-      if (token == null || token.isEmpty) {
-        debugPrint(
-          'No FCM token found for customer $customerId',
-        );
-        return;
-      }
-
-      await supabase.functions.invoke(
-        'send-fcm',
-        body: {
-          'token': token,
-          'title': title,
-          'body': message,
-        },
-      );
-    } catch (error) {
-      debugPrint(
-        'Failed to send service record notification: $error',
-      );
-    }
+    Map<String, dynamic>? data,
+  }) {
+    return CustomerNotificationService.sendToAllDevices(
+      customerId: customerId,
+      title: title,
+      message: message,
+      data: data,
+    );
   }
 
   Future<void> createRecord({
@@ -378,6 +504,7 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
           'title': title,
           'message': message,
           'notification_type': 'service',
+          'target_page': 'service_records',
           'is_read': false,
         });
 
@@ -385,6 +512,14 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
           customerId: customerId.toString(),
           title: title,
           message: message,
+          data: {
+            'notification_type': 'service',
+            'target_page': 'service_records',
+            'record_id': record['record_id'],
+            'vehicle_id': vehicleId,
+            'booking_id': bookingId,
+            'quotation_id': quotationId,
+          },
         );
       }
 
@@ -2238,7 +2373,7 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: loadData,
+        onRefresh: () => loadData(),
         child: CustomScrollView(
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),

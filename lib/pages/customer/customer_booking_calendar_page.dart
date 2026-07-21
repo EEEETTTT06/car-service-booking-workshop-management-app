@@ -196,12 +196,42 @@ class _CustomerBookingCalendarPageState
 
   bool isPastDate(DateTime date) {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final checkDate = DateTime(date.year, date.month, date.day);
+
+    final today = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
+    final checkDate = DateTime(
+      date.year,
+      date.month,
+      date.day,
+    );
 
     return checkDate.isBefore(today);
   }
 
+  bool isTodayDate(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
+    final checkDate = DateTime(
+      date.year,
+      date.month,
+      date.day,
+    );
+
+    return checkDate == today;
+  }
+
+  bool isUnavailableDate(DateTime date) {
+    return isPastDate(date) || isTodayDate(date);
+  }
   bool isSelected(DateTime date) {
     if (selectedDate == null) return false;
 
@@ -221,6 +251,13 @@ class _CustomerBookingCalendarPageState
   void selectDate(DateTime date) {
     if (isPastDate(date)) {
       showMessage('Past dates cannot be selected.');
+      return;
+    }
+
+    if (isTodayDate(date)) {
+      showMessage(
+        'Same-day booking is not available. Please select tomorrow or a later date.',
+      );
       return;
     }
 
@@ -303,18 +340,23 @@ class _CustomerBookingCalendarPageState
     if (isSelected(date)) return const Color(0xFF339BFF);
     if (isClosed(date)) return Colors.red.shade400;
     if (isFull(date)) return Colors.grey.shade400;
-    if (isPastDate(date)) return Colors.grey.shade200;
+    if (isUnavailableDate(date)) {
+      return Colors.grey.shade200;
+    }
     return Colors.white;
   }
 
   Color getTextColor(DateTime date) {
     if (isSelected(date) || isClosed(date)) return Colors.white;
-    if (isPastDate(date)) return Colors.black38;
+    if (isUnavailableDate(date)) {
+      return Colors.black38;
+    }
     return Colors.black87;
   }
 
   String getStatusText(DateTime date) {
     if (isPastDate(date)) return 'Past';
+    if (isTodayDate(date)) return 'Today';
     if (isClosed(date)) return 'Closed';
     if (isFull(date)) return 'Full';
 
@@ -693,7 +735,7 @@ class _CustomerBookingCalendarPageState
                               ),
                               buildLegend(
                                 color: Colors.grey.shade200,
-                                text: 'Past',
+                                text: 'Past / Today',
                               ),
                             ],
                           ),

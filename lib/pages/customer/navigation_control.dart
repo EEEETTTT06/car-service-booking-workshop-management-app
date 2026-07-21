@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/login_page.dart';
-
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'customer_dashboard_content.dart';
 import 'my_vehicles_page.dart';
 import 'book_service_page.dart';
@@ -12,7 +13,12 @@ import 'customer_settings_page.dart';
 import 'notification_page.dart';
 
 class NavigationControl extends StatefulWidget {
-  const NavigationControl({super.key});
+  final int initialIndex;
+
+  const NavigationControl({
+    super.key,
+    this.initialIndex = 0,
+  });
 
   @override
   State<NavigationControl> createState() => _NavigationControlState();
@@ -21,7 +27,7 @@ class NavigationControl extends StatefulWidget {
 class _NavigationControlState extends State<NavigationControl> {
   final supabase = Supabase.instance.client;
 
-  int currentIndex = 0;
+  late int currentIndex;
   bool notificationOn = true;
   bool isLoadingProfile = false;
 
@@ -34,6 +40,17 @@ class _NavigationControlState extends State<NavigationControl> {
   @override
   void initState() {
     super.initState();
+
+    final requestedIndex = widget.initialIndex;
+
+    if (requestedIndex < 0) {
+      currentIndex = 0;
+    } else if (requestedIndex > 4) {
+      currentIndex = 4;
+    } else {
+      currentIndex = requestedIndex;
+    }
+
     loadCustomerProfile();
   }
 
@@ -74,13 +91,75 @@ class _NavigationControlState extends State<NavigationControl> {
   }
 
   Future<void> logoutCustomer() async {
+    try {
+      final user = supabase.auth.currentUser;
+
+      final currentToken =
+      await FirebaseMessaging.instance.getToken();
+
+      if (user != null &&
+          currentToken != null &&
+          currentToken.trim().isNotEmpty) {
+        final customer = await supabase
+            .from('customers')
+            .select('customer_id, fcm_token')
+            .eq('auth_user_id', user.id)
+            .maybeSingle();
+
+        final customerId =
+        customer?['customer_id']?.toString();
+
+        if (customerId != null &&
+            customerId.isNotEmpty) {
+          // Delete only this device's token.
+          await supabase
+              .from('customer_fcm_tokens')
+              .delete()
+              .eq('customer_id', customerId)
+              .eq('fcm_token', currentToken);
+
+          // Clear the old single-token column only when
+          // it belongs to this current device.
+          final oldToken =
+          customer?['fcm_token']?.toString();
+
+          if (oldToken == currentToken) {
+            await supabase
+                .from('customers')
+                .update({
+              'fcm_token': null,
+            })
+                .eq('customer_id', customerId);
+          }
+        }
+      }
+    } catch (error) {
+      debugPrint(
+        'Failed to remove customer FCM token during logout: $error',
+      );
+    }
+
+    try {
+      final preferences =
+      await SharedPreferences.getInstance();
+
+      await preferences.remove('remember_me');
+      await preferences.remove('remembered_role');
+    } catch (error) {
+      debugPrint(
+        'Failed to clear Remember Me settings: $error',
+      );
+    }
+
     await supabase.auth.signOut();
 
     if (!mounted) return;
 
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => const LoginPage()),
+      MaterialPageRoute(
+        builder: (_) => const LoginPage(),
+      ),
           (route) => false,
     );
   }
@@ -267,7 +346,9 @@ class _NavigationControlState extends State<NavigationControl> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const CustomerNotificationPage(),
+                            builder: (_) => CustomerNotificationPage(
+                              onNavigate: changePage,
+                            ),
                           ),
                         );
                       },

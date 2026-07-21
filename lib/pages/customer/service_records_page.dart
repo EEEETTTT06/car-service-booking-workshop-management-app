@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 import '../../services/pdf_service.dart';
-
 class ServiceRecordsPage extends StatefulWidget {
   final String? initialPlate;
 
@@ -27,6 +30,8 @@ class _ServiceRecordsPageState extends State<ServiceRecordsPage> {
   Map<String, dynamic>? currentCustomer;
   List<Map<String, dynamic>> customerVehicles = [];
   List<Map<String, dynamic>> records = [];
+  RealtimeChannel? serviceRecordsRealtimeChannel;
+  bool isRealtimeRefreshing = false;
 
   @override
   void initState() {
@@ -54,6 +59,15 @@ class _ServiceRecordsPageState extends State<ServiceRecordsPage> {
 
   @override
   void dispose() {
+    final channel =
+        serviceRecordsRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     searchController.dispose();
     scrollController.dispose();
     super.dispose();
@@ -74,6 +88,7 @@ class _ServiceRecordsPageState extends State<ServiceRecordsPage> {
       await fetchCurrentCustomer();
       await fetchCustomerVehicles();
       await fetchServiceRecords();
+      setupRealtimeSubscription();
     } catch (error) {
       showMessage('Failed to load service records: $error');
     } finally {
@@ -139,6 +154,96 @@ class _ServiceRecordsPageState extends State<ServiceRecordsPage> {
         .order('created_at', ascending: false);
 
     records = List<Map<String, dynamic>>.from(response);
+  }
+
+  void setupRealtimeSubscription() {
+    if (currentCustomer == null) return;
+
+    // Prevent duplicate subscriptions.
+    if (serviceRecordsRealtimeChannel != null) {
+      return;
+    }
+
+    final customerId =
+    currentCustomer!['customer_id'].toString();
+
+    serviceRecordsRealtimeChannel = supabase
+        .channel(
+      'customer-service-records-$customerId',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'service_records',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'customer_id',
+        value: customerId,
+      ),
+      callback: (payload) {
+        debugPrint(
+          'Customer service record changed: '
+              '${payload.eventType}',
+        );
+
+        refreshServiceRecordsFromRealtime();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'service_record_items',
+      callback: (payload) {
+        debugPrint(
+          'Service record item changed: '
+              '${payload.eventType}',
+        );
+
+        refreshServiceRecordsFromRealtime();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'vehicles',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'customer_id',
+        value: customerId,
+      ),
+      callback: (payload) {
+        debugPrint(
+          'Customer vehicle changed: '
+              '${payload.eventType}',
+        );
+
+        refreshServiceRecordsFromRealtime();
+      },
+    )
+        .subscribe();
+  }
+
+  Future<void> refreshServiceRecordsFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await fetchCustomerVehicles();
+      await fetchServiceRecords();
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (error) {
+      debugPrint(
+        'Realtime service records refresh failed: $error',
+      );
+    } finally {
+      isRealtimeRefreshing = false;
+    }
   }
 
   String formatDate(String? dateText) {

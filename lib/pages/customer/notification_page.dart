@@ -1,8 +1,17 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_service.dart';
+import 'my_vehicles_page.dart';
+import 'book_service_page.dart';
+import 'customer_quotations_page.dart';
+import 'service_records_page.dart';
 
 class CustomerNotificationPage extends StatefulWidget {
-  const CustomerNotificationPage({super.key});
+  final ValueChanged<int>? onNavigate;
+
+  const CustomerNotificationPage({
+    super.key,
+    this.onNavigate,
+  });
 
   @override
   State<CustomerNotificationPage> createState() =>
@@ -143,6 +152,113 @@ class _CustomerNotificationPageState
     return const Color(0xFF339BFF);
   }
 
+  int? getTargetPageIndex(Map<String, dynamic> notification) {
+    final targetPage =
+        notification['target_page']?.toString().trim().toLowerCase() ?? '';
+
+    switch (targetPage) {
+      case 'my_vehicles':
+      case 'vehicles':
+      case 'vehicle_claim':
+        return 1;
+      case 'my_bookings':
+      case 'book_service':
+      case 'booking':
+        return 2;
+      case 'customer_quotations':
+      case 'quotations':
+      case 'quotation':
+        return 3;
+      case 'service_records':
+      case 'records':
+      case 'service_record':
+        return 4;
+    }
+
+    final notificationType =
+        notification['notification_type']?.toString().toLowerCase() ?? '';
+    final title = notification['title']?.toString().toLowerCase() ?? '';
+
+    if (notificationType.contains('claim') || title.contains('claim')) {
+      return 1;
+    }
+
+    if (notificationType.contains('quotation') ||
+        title.contains('quotation')) {
+      return 3;
+    }
+
+    if (title.contains('service record') || title.contains('record available')) {
+      return 4;
+    }
+
+    if (notificationType.contains('booking') ||
+        notificationType.contains('service') ||
+        title.contains('booking') ||
+        title.contains('arrived') ||
+        title.contains('status') ||
+        title.contains('completed')) {
+      return 2;
+    }
+
+    return null;
+  }
+
+  Widget? buildTargetPage(int pageIndex) {
+    switch (pageIndex) {
+      case 1:
+        return const MyVehiclesPage();
+      case 2:
+        return const BookServicePage();
+      case 3:
+        return const CustomerQuotationPage();
+      case 4:
+        return const ServiceRecordsPage();
+      default:
+        return null;
+    }
+  }
+
+  Future<void> handleNotificationTap(
+      Map<String, dynamic> notification,
+      ) async {
+    final notificationId =
+        notification['notification_id']?.toString().trim() ?? '';
+
+    if (notification['is_read'] != true && notificationId.isNotEmpty) {
+      await markAsRead(notificationId);
+    }
+
+    if (!mounted) return;
+
+    final targetIndex = getTargetPageIndex(notification);
+
+    if (targetIndex == null) {
+      showMessage('This notification does not have a linked page.');
+      return;
+    }
+
+    if (widget.onNavigate != null) {
+      widget.onNavigate!(targetIndex);
+      Navigator.pop(context);
+      return;
+    }
+
+    final targetPage = buildTargetPage(targetIndex);
+
+    if (targetPage == null) {
+      showMessage('Unable to open the linked page.');
+      return;
+    }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => targetPage,
+      ),
+    );
+  }
+
   void showMessage(String message) {
     if (!mounted) return;
 
@@ -233,9 +349,7 @@ class _CustomerNotificationPageState
       child: ListTile(
         contentPadding: const EdgeInsets.all(14),
         onTap: () async {
-          if (!isRead) {
-            await markAsRead(notification['notification_id']);
-          }
+          await handleNotificationTap(notification);
         },
         leading: CircleAvatar(
           radius: 24,

@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 import 'admin_quotations_page.dart';
+import '../../services/customer_notification_service.dart';
 
 class PendingServicePage extends StatefulWidget {
   const PendingServicePage({super.key});
@@ -19,7 +23,9 @@ class _PendingServicePageState extends State<PendingServicePage> {
   bool showBackToTop = false;
 
   List<Map<String, dynamic>> pendingServices = [];
-
+  RealtimeChannel? pendingServicesRealtimeChannel;
+  Timer? realtimeRefreshTimer;
+  bool isRealtimeRefreshing = false;
   final List<String> statusList = [
     'Waiting Fix',
     'In Progress',
@@ -31,6 +37,7 @@ class _PendingServicePageState extends State<PendingServicePage> {
     super.initState();
 
     fetchPendingServices();
+    setupRealtimeSubscription();
 
     scrollController.addListener(() {
       if (!mounted) return;
@@ -49,6 +56,17 @@ class _PendingServicePageState extends State<PendingServicePage> {
 
   @override
   void dispose() {
+    realtimeRefreshTimer?.cancel();
+
+    final channel =
+        pendingServicesRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     super.dispose();
   }
@@ -80,33 +98,140 @@ class _PendingServicePageState extends State<PendingServicePage> {
     await fetchPendingServices();
   }
 
-  Future<void> fetchPendingServices() async {
-    setState(() => isLoading = true);
+  Future<void> fetchPendingServices({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
-      final response = await supabase.from('pending_services').select('''
-  *,
-  vehicles(plate_number, car_model),
-  customers(name, phone, email, fcm_token),
-  quotations(
-    quotation_id,
-    status,
-    problem_description,
-    total,
-    quotation_items(
-      item_id,
-      item_name,
-      quantity,
-      price
-    )
-  )
-''').order('created_at', ascending: false);
+      final response = await supabase
+          .from('pending_services')
+          .select('''
+          *,
+          vehicles(plate_number, car_model),
+          customers(name, phone, email, fcm_token),
+          quotations(
+            quotation_id,
+            status,
+            problem_description,
+            total,
+            quotation_items(
+              item_id,
+              item_name,
+              quantity,
+              price
+            )
+          )
+        ''')
+          .order(
+        'created_at',
+        ascending: false,
+      );
 
-      pendingServices = List<Map<String, dynamic>>.from(response);
+      if (!mounted) return;
+
+      setState(() {
+        pendingServices =
+        List<Map<String, dynamic>>.from(
+          response,
+        );
+      });
     } catch (error) {
-      showMessage('Failed to load pending services: $error');
+      if (showLoading) {
+        showMessage(
+          'Failed to load pending services: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime pending service refresh failed: $error',
+        );
+      }
     } finally {
-      if (mounted) setState(() => isLoading = false);
+      if (showLoading && mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+  void setupRealtimeSubscription() {
+    if (pendingServicesRealtimeChannel != null) {
+      return;
+    }
+
+    pendingServicesRealtimeChannel = supabase
+        .channel(
+      'admin-pending-services-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'pending_services',
+      callback: (payload) {
+        debugPrint(
+          'Pending service changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotations',
+      callback: (payload) {
+        debugPrint(
+          'Linked quotation changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotation_items',
+      callback: (payload) {
+        debugPrint(
+          'Quotation item changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .subscribe();
+  }
+
+  void scheduleRealtimeRefresh() {
+    realtimeRefreshTimer?.cancel();
+
+    realtimeRefreshTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshPendingServicesFromRealtime,
+    );
+  }
+
+  Future<void> refreshPendingServicesFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await fetchPendingServices(
+        showLoading: false,
+      );
+    } finally {
+      isRealtimeRefreshing = false;
     }
   }
 
@@ -174,34 +299,14 @@ class _PendingServicePageState extends State<PendingServicePage> {
     required String customerId,
     required String title,
     required String message,
-  }) async {
-    try {
-      final customer = await supabase
-          .from('customers')
-          .select('fcm_token')
-          .eq('customer_id', customerId)
-          .maybeSingle();
-
-      final token = customer?['fcm_token']?.toString();
-
-      if (token == null || token.isEmpty) {
-        debugPrint('No FCM token found for customer $customerId');
-        return;
-      }
-
-      final response = await supabase.functions.invoke(
-        'send-fcm',
-        body: {
-          'token': token,
-          'title': title,
-          'body': message,
-        },
-      );
-
-      debugPrint('FCM response: ${response.data}');
-    } catch (error) {
-      debugPrint('Failed to send FCM notification: $error');
-    }
+    Map<String, dynamic>? data,
+  }) {
+    return CustomerNotificationService.sendToAllDevices(
+      customerId: customerId,
+      title: title,
+      message: message,
+      data: data,
+    );
   }
   Future<bool> serviceRecordAlreadyExists(String quotationId) async {
     final response = await supabase
@@ -398,19 +503,21 @@ class _PendingServicePageState extends State<PendingServicePage> {
         automaticRecordCreated
             ? 'The service for vehicle $plate has been completed. Your service record is now available.'
             : message;
-
+        final targetPage = automaticRecordCreated
+            ? 'service_records'
+            : 'my_bookings';
         await supabase.from('notifications').insert({
           'customer_id': customerId,
           'vehicle_id': service['vehicle_id'],
           'booking_id': service['booking_id'],
           'quotation_id': service['quotation_id'],
-          'pending_id':
-          automaticRecordCreated
+          'pending_id': automaticRecordCreated
               ? null
               : service['pending_id'],
           'title': notificationTitle,
           'message': notificationMessage,
           'notification_type': 'service',
+          'target_page': targetPage,
           'is_read': false,
         });
 
@@ -418,6 +525,16 @@ class _PendingServicePageState extends State<PendingServicePage> {
           customerId: customerId.toString(),
           title: notificationTitle,
           message: notificationMessage,
+          data: {
+            'notification_type': 'service',
+            'target_page': targetPage,
+            'vehicle_id': service['vehicle_id'],
+            'booking_id': service['booking_id'],
+            'quotation_id': service['quotation_id'],
+            'pending_id': automaticRecordCreated
+                ? null
+                : service['pending_id'],
+          },
         );
       }
 
@@ -1105,7 +1222,7 @@ class _PendingServicePageState extends State<PendingServicePage> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-        onRefresh: fetchPendingServices,
+        onRefresh: () => fetchPendingServices(),
         child: CustomScrollView(
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),

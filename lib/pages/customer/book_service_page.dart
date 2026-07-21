@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'customer_booking_calendar_page.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
+import 'dart:async';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
 class BookServicePage extends StatefulWidget {
   const BookServicePage({super.key});
 
@@ -17,6 +19,8 @@ class _BookServicePageState extends State<BookServicePage> {
   bool showBackToTop = false;
   Map<String, dynamic>? currentCustomer;
   List<Map<String, dynamic>> bookings = [];
+  RealtimeChannel? bookingRealtimeChannel;
+  bool isRealtimeRefreshing = false;
 
   @override
   void initState() {
@@ -54,6 +58,7 @@ class _BookServicePageState extends State<BookServicePage> {
       await fetchCurrentCustomer();
       await updateExpiredBookings();
       await fetchBookings();
+      setupRealtimeSubscription();
     }catch (error) {
       showMessage('Failed to load bookings: $error');
     } finally {
@@ -104,6 +109,77 @@ class _BookServicePageState extends State<BookServicePage> {
         .order('appointment_date', ascending: true);
 
     bookings = List<Map<String, dynamic>>.from(response);
+  }
+
+  void setupRealtimeSubscription() {
+    if (currentCustomer == null) return;
+
+    // Prevent duplicate subscriptions.
+    if (bookingRealtimeChannel != null) {
+      return;
+    }
+
+    final customerId =
+    currentCustomer!['customer_id'].toString();
+
+    bookingRealtimeChannel = supabase
+        .channel(
+      'customer-bookings-$customerId',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'bookings',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'customer_id',
+        value: customerId,
+      ),
+      callback: (payload) {
+        debugPrint(
+          'Customer booking changed: '
+              '${payload.eventType}',
+        );
+
+        refreshBookingsFromRealtime();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'pending_services',
+      callback: (payload) {
+        debugPrint(
+          'Pending service changed: '
+              '${payload.eventType}',
+        );
+
+        refreshBookingsFromRealtime();
+      },
+    )
+        .subscribe();
+  }
+
+  Future<void> refreshBookingsFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await fetchBookings();
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (error) {
+      debugPrint(
+        'Realtime booking refresh failed: $error',
+      );
+    } finally {
+      isRealtimeRefreshing = false;
+    }
   }
 
   Future<void> updateExpiredBookings() async {
@@ -1381,6 +1457,14 @@ class _BookServicePageState extends State<BookServicePage> {
 
   @override
   void dispose() {
+    final channel = bookingRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     super.dispose();
   }

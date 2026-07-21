@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
+import '../../services/customer_notification_service.dart';
 
 class AdminQuotationsPage extends StatefulWidget {
   final Map<String, dynamic>? initialPendingService;
@@ -26,6 +30,9 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
   List<Map<String, dynamic>> quotations = [];
   List<Map<String, dynamic>> vehicles = [];
   List<Map<String, dynamic>> pendingServices = [];
+  RealtimeChannel? quotationsRealtimeChannel;
+  Timer? realtimeRefreshTimer;
+  bool isRealtimeRefreshing = false;
 
   @override
   void initState() {
@@ -45,6 +52,8 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
       }
     });
 
+    setupRealtimeSubscription();
+
     scrollController.addListener(() {
       if (!mounted) return;
 
@@ -62,6 +71,17 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
 
   @override
   void dispose() {
+    realtimeRefreshTimer?.cancel();
+
+    final channel =
+        quotationsRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     super.dispose();
   }
@@ -76,18 +96,38 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     );
   }
 
-  Future<void> loadData() async {
-    setState(() => isLoading = true);
+  Future<void> loadData({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
       await fetchVehicles();
       await fetchPendingServices();
       await fetchQuotations();
-    } catch (error) {
-      showMessage('Failed to load quotations: $error');
-    } finally {
+
       if (mounted) {
-        setState(() => isLoading = false);
+        setState(() {});
+      }
+    } catch (error) {
+      if (showLoading) {
+        showMessage(
+          'Failed to load quotations: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime quotation refresh failed: $error',
+        );
+      }
+    } finally {
+      if (showLoading && mounted) {
+        setState(() {
+          isLoading = false;
+        });
       }
     }
   }
@@ -124,7 +164,92 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
 
     quotations = List<Map<String, dynamic>>.from(response);
   }
+  void setupRealtimeSubscription() {
+    if (quotationsRealtimeChannel != null) {
+      return;
+    }
 
+    quotationsRealtimeChannel = supabase
+        .channel(
+      'admin-quotations-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotations',
+      callback: (payload) {
+        debugPrint(
+          'Quotation changed: ${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotation_items',
+      callback: (payload) {
+        debugPrint(
+          'Quotation item changed: ${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'pending_services',
+      callback: (payload) {
+        debugPrint(
+          'Quotation pending service changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'vehicles',
+      callback: (payload) {
+        debugPrint(
+          'Quotation vehicle changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .subscribe();
+  }
+
+  void scheduleRealtimeRefresh() {
+    realtimeRefreshTimer?.cancel();
+
+    realtimeRefreshTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshQuotationsFromRealtime,
+    );
+  }
+
+  Future<void> refreshQuotationsFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await loadData(
+        showLoading: false,
+      );
+    } finally {
+      isRealtimeRefreshing = false;
+    }
+  }
   String displayCustomer(dynamic customer) {
     final name = customer?.toString().trim() ?? '';
     return name.isEmpty ? 'Not Provided' : name;
@@ -395,34 +520,14 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     required String customerId,
     required String title,
     required String message,
-  }) async {
-    try {
-      final customer = await supabase
-          .from('customers')
-          .select('fcm_token')
-          .eq('customer_id', customerId)
-          .maybeSingle();
-
-      final token = customer?['fcm_token']?.toString();
-
-      if (token == null || token.isEmpty) {
-        debugPrint('No FCM token found for customer $customerId');
-        return;
-      }
-
-      final response = await supabase.functions.invoke(
-        'send-fcm',
-        body: {
-          'token': token,
-          'title': title,
-          'body': message,
-        },
-      );
-
-      debugPrint('Quotation FCM response: ${response.data}');
-    } catch (error) {
-      debugPrint('Failed to send quotation FCM: $error');
-    }
+    Map<String, dynamic>? data,
+  }) {
+    return CustomerNotificationService.sendToAllDevices(
+      customerId: customerId,
+      title: title,
+      message: message,
+      data: data,
+    );
   }
 
   Future<void> markQuotationArrived(
@@ -607,6 +712,7 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
           'title': title,
           'message': message,
           'notification_type': 'service',
+          'target_page': 'my_bookings',
           'is_read': false,
         });
 
@@ -614,6 +720,13 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
           customerId: customerId.toString(),
           title: title,
           message: message,
+          data: {
+            'notification_type': 'service',
+            'target_page': 'my_bookings',
+            'vehicle_id': vehicleId,
+            'booking_id': bookingId,
+            'quotation_id': quotationId,
+          },
         );
       }
 
@@ -722,6 +835,7 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
         'title': title,
         'message': message,
         'notification_type': 'quotation',
+        'target_page': 'customer_quotations',
         'is_read': false,
       });
 
@@ -729,6 +843,13 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
         customerId: customerId.toString(),
         title: title,
         message: message,
+        data: {
+          'notification_type': 'quotation',
+          'target_page': 'customer_quotations',
+          'vehicle_id': quotation['vehicle_id'],
+          'booking_id': quotation['booking_id'],
+          'quotation_id': quotationId,
+        },
       );
 
       await loadData();
@@ -832,6 +953,7 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
           'title': title,
           'message': message,
           'notification_type': 'quotation',
+          'target_page': 'customer_quotations',
           'is_read': false,
         });
 
@@ -839,6 +961,13 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
           customerId: customerId.toString(),
           title: title,
           message: message,
+          data: {
+            'notification_type': 'quotation',
+            'target_page': 'customer_quotations',
+            'vehicle_id': quotation['vehicle_id'],
+            'booking_id': quotation['booking_id'],
+            'quotation_id': quotationId,
+          },
         );
       }
 
@@ -2525,7 +2654,7 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: loadData,
+        onRefresh: () => loadData(),
         child: CustomScrollView(
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),

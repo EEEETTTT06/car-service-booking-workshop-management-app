@@ -5,6 +5,7 @@ import 'register_page.dart';
 import 'forgot_password_page.dart';
 import '../../services/supabase_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -19,9 +20,44 @@ class _LoginPageState extends State<LoginPage> {
 
   bool isLoading = false;
   bool hidePassword = true;
-
+  bool rememberMe = false;
+  static const String rememberMeKey = 'remember_me';
+  static const String rememberedRoleKey = 'remembered_role';
   String? emailError;
   String? passwordError;
+
+  Future<void> saveRememberMeSetting({
+    required String role,
+  }) async {
+    try {
+      final preferences =
+      await SharedPreferences.getInstance();
+
+      await preferences.setBool(
+        rememberMeKey,
+        rememberMe,
+      );
+
+      if (rememberMe) {
+        await preferences.setString(
+          rememberedRoleKey,
+          role,
+        );
+      } else {
+        await preferences.remove(
+          rememberedRoleKey,
+        );
+      }
+
+      debugPrint(
+        'Remember Me: $rememberMe, Role: $role',
+      );
+    } catch (error) {
+      debugPrint(
+        'Failed to save Remember Me setting: $error',
+      );
+    }
+  }
 
   Future<void> loginCustomer() async {
     await loginUser(isAdminLogin: false);
@@ -83,6 +119,10 @@ class _LoginPageState extends State<LoginPage> {
           return;
         }
 
+        await saveRememberMeSetting(
+          role: 'admin',
+        );
+
         await updateAdminFcmToken(user.id);
 
         debugPrint('Admin login successful');
@@ -118,7 +158,14 @@ class _LoginPageState extends State<LoginPage> {
           return;
         }
 
-        await updateCustomerFcmToken(user.id);
+        await saveRememberMeSetting(
+          role: 'customer',
+        );
+
+        await updateCustomerFcmToken(
+          customerId:
+          customerData['customer_id'].toString(),
+        );
 
         debugPrint('Customer login successful');
 
@@ -177,23 +224,54 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('Admin FCM token error: $e');
     }
   }
-  Future<void> updateCustomerFcmToken(String userId) async {
+  Future<void> updateCustomerFcmToken({
+    required String customerId,
+  }) async {
     try {
-      final fcmToken = await FirebaseMessaging.instance.getToken();
+      final fcmToken =
+      await FirebaseMessaging.instance.getToken();
 
-      if (fcmToken != null && fcmToken.isNotEmpty) {
-        await supabase.from('customers').update({
-          'fcm_token': fcmToken,
-        }).eq('customer_id', userId);
-
-        await supabase.from('customers').update({
-          'fcm_token': fcmToken,
-        }).eq('auth_user_id', userId);
-
-        debugPrint('Saved Customer FCM Token: $fcmToken');
+      if (fcmToken == null ||
+          fcmToken.trim().isEmpty) {
+        debugPrint(
+          'Customer FCM token is empty or unavailable.',
+        );
+        return;
       }
-    } catch (e) {
-      debugPrint('Customer FCM token skipped/error: $e');
+
+      // Save each customer device separately.
+      await supabase
+          .from('customer_fcm_tokens')
+          .upsert(
+        {
+          'customer_id': customerId,
+          'fcm_token': fcmToken,
+          'platform': 'Android',
+          'device_name': 'Customer Device',
+          'last_login':
+          DateTime.now().toIso8601String(),
+        },
+        onConflict: 'fcm_token',
+      );
+
+      // Keep the old token column temporarily.
+      // Some existing notification code may still use it.
+      await supabase
+          .from('customers')
+          .update({
+        'fcm_token': fcmToken,
+      }).eq(
+        'customer_id',
+        customerId,
+      );
+
+      debugPrint(
+        'Customer device registered successfully.',
+      );
+    } catch (error) {
+      debugPrint(
+        'Customer FCM token registration error: $error',
+      );
     }
   }
 
@@ -319,29 +397,54 @@ class _LoginPageState extends State<LoginPage> {
                     isPassword: true,
                     errorText: passwordError,
                   ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: isLoading
-                          ? null
-                          : () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const ForgotPasswordPage(),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: rememberMe,
+                        activeColor: const Color(0xFF339BFF),
+                        onChanged: isLoading
+                            ? null
+                            : (value) {
+                          setState(() {
+                            rememberMe = value ?? false;
+                          });
+                        },
+                      ),
+                      const Expanded(
+                        child: Text(
+                          'Remember Me',
+                          style: TextStyle(
+                            color: Color(0xFF0F4C81),
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
                           ),
-                        );
-                      },
-                      child: const Text(
-                        'Forgot Password?',
-                        style: TextStyle(
-                          color: Colors.lightBlue,
-                          fontSize: 15,
-                          decoration: TextDecoration.underline,
-                          decorationColor: Colors.lightBlue,
                         ),
                       ),
-                    ),
+                      TextButton(
+                        onPressed: isLoading
+                            ? null
+                            : () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                              const ForgotPasswordPage(),
+                            ),
+                          );
+                        },
+                        child: const Text(
+                          'Forgot Password?',
+                          style: TextStyle(
+                            color: Colors.lightBlue,
+                            fontSize: 14,
+                            decoration:
+                            TextDecoration.underline,
+                            decorationColor:
+                            Colors.lightBlue,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 30),
                   SizedBox(

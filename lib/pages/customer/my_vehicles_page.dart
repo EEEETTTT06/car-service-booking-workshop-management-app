@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'book_service_page.dart';
 import 'service_records_page.dart';
 import '../../services/supabase_service.dart';
@@ -23,6 +26,9 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
   List<Map<String, dynamic>> vehicles = [];
   Map<String, Map<String, dynamic>> vehicleBookings = {};
 
+  RealtimeChannel? vehiclesRealtimeChannel;
+  bool isRealtimeRefreshing = false;
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +50,14 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
 
   @override
   void dispose() {
+    final channel = vehiclesRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     super.dispose();
   }
@@ -63,6 +77,7 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
       await fetchCurrentCustomer();
       await fetchVehicles();
       await fetchVehicleBookings();
+      setupRealtimeSubscription();
     } catch (error) {
       showMessage('Failed to load vehicles: $error');
     } finally {
@@ -126,6 +141,83 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
     }
 
     vehicleBookings = temp;
+  }
+
+  void setupRealtimeSubscription() {
+    if (currentCustomer == null) return;
+
+    // Prevent duplicate Realtime subscriptions.
+    if (vehiclesRealtimeChannel != null) {
+      return;
+    }
+
+    final customerId =
+    currentCustomer!['customer_id'].toString();
+
+    vehiclesRealtimeChannel = supabase
+        .channel(
+      'customer-vehicles-$customerId',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'vehicles',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'customer_id',
+        value: customerId,
+      ),
+      callback: (payload) {
+        debugPrint(
+          'Customer vehicle changed: '
+              '${payload.eventType}',
+        );
+
+        refreshVehiclesFromRealtime();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'bookings',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'customer_id',
+        value: customerId,
+      ),
+      callback: (payload) {
+        debugPrint(
+          'Customer vehicle booking changed: '
+              '${payload.eventType}',
+        );
+
+        refreshVehiclesFromRealtime();
+      },
+    )
+        .subscribe();
+  }
+
+  Future<void> refreshVehiclesFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await fetchVehicles();
+      await fetchVehicleBookings();
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (error) {
+      debugPrint(
+        'Realtime vehicle refresh failed: $error',
+      );
+    } finally {
+      isRealtimeRefreshing = false;
+    }
   }
 
   String toSqlDate(DateTime date) {

@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'admin_sidebar.dart';
 import 'admin_appointment_calendar_page.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
+import '../../services/customer_notification_service.dart';
 
 class AdminBookingsPage extends StatefulWidget {
   const AdminBookingsPage({super.key});
@@ -21,10 +25,16 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
   final ScrollController scrollController = ScrollController();
   bool showBackToTop = false;
 
+  RealtimeChannel? bookingsRealtimeChannel;
+  Timer? realtimeRefreshTimer;
+  bool isRealtimeRefreshing = false;
+
   @override
   void initState() {
     super.initState();
+
     fetchBookings();
+    setupRealtimeSubscription();
 
     scrollController.addListener(() {
       if (scrollController.offset > 350 && !showBackToTop) {
@@ -38,6 +48,16 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
 
   @override
   void dispose() {
+    realtimeRefreshTimer?.cancel();
+
+    final channel = bookingsRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     super.dispose();
   }
@@ -50,28 +70,118 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
     );
   }
 
-  Future<void> fetchBookings() async {
-    setState(() => isLoading = true);
+  Future<void> fetchBookings({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
-      final response = await supabase.from('bookings').select('''
-        *,
-        customers(name, phone, email, fcm_token),
-        vehicles(plate_number, car_model),
-        booking_services(
-          services(service_name, price)
-        )
-      ''').order('appointment_date', ascending: true);
+      final response = await supabase
+          .from('bookings')
+          .select('''
+          *,
+          customers(name, phone, email, fcm_token),
+          vehicles(plate_number, car_model),
+          booking_services(
+            services(service_name, price)
+          )
+        ''')
+          .order(
+        'appointment_date',
+        ascending: true,
+      );
+
+      if (!mounted) return;
 
       setState(() {
-        bookings = List<Map<String, dynamic>>.from(response);
+        bookings =
+        List<Map<String, dynamic>>.from(
+          response,
+        );
       });
     } catch (error) {
-      showMessage('Failed to load bookings: $error');
+      if (showLoading) {
+        showMessage(
+          'Failed to load bookings: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime booking refresh failed: $error',
+        );
+      }
     } finally {
-      if (mounted) setState(() => isLoading = false);
+      if (showLoading && mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
+  void setupRealtimeSubscription() {
+    if (bookingsRealtimeChannel != null) {
+      return;
+    }
+
+    bookingsRealtimeChannel = supabase
+        .channel('admin-bookings-realtime')
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'bookings',
+      callback: (payload) {
+        debugPrint(
+          'Admin booking changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'booking_services',
+      callback: (payload) {
+        debugPrint(
+          'Booking service changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .subscribe();
+  }
+
+  void scheduleRealtimeRefresh() {
+    realtimeRefreshTimer?.cancel();
+
+    realtimeRefreshTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshBookingsFromRealtime,
+    );
+  }
+
+  Future<void> refreshBookingsFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await fetchBookings(
+        showLoading: false,
+      );
+    } finally {
+      isRealtimeRefreshing = false;
+    }
+  }
+
 
   DateTime get today {
     final now = DateTime.now();
@@ -237,34 +347,14 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
     required String customerId,
     required String title,
     required String message,
-  }) async {
-    try {
-      final customer = await supabase
-          .from('customers')
-          .select('fcm_token')
-          .eq('customer_id', customerId)
-          .maybeSingle();
-
-      final token = customer?['fcm_token']?.toString();
-
-      if (token == null || token.isEmpty) {
-        debugPrint('No FCM token found for customer $customerId');
-        return;
-      }
-
-      final response = await supabase.functions.invoke(
-        'send-fcm',
-        body: {
-          'token': token,
-          'title': title,
-          'body': message,
-        },
-      );
-
-      debugPrint('Booking FCM response: ${response.data}');
-    } catch (error) {
-      debugPrint('Failed to send booking FCM: $error');
-    }
+    Map<String, dynamic>? data,
+  }) {
+    return CustomerNotificationService.sendToAllDevices(
+      customerId: customerId,
+      title: title,
+      message: message,
+      data: data,
+    );
   }
 
   Future<void> createBookingNotification({
@@ -282,13 +372,21 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
       'vehicle_id': booking['vehicle_id'],
       'title': title,
       'message': message,
+      'notification_type': 'booking',
+      'target_page': 'my_bookings',
       'is_read': false,
     });
 
     await sendFcmPushNotification(
-      customerId: customerId,
+      customerId: customerId.toString(),
       title: title,
       message: message,
+      data: {
+        'notification_type': 'booking',
+        'target_page': 'my_bookings',
+        'booking_id': booking['booking_id'],
+        'vehicle_id': booking['vehicle_id'],
+      },
     );
   }
 

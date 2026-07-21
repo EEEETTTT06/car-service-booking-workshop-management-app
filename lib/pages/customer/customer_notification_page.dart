@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CustomerNotificationPage extends StatefulWidget {
   const CustomerNotificationPage({super.key});
@@ -15,16 +16,60 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
   final ScrollController scrollController = ScrollController();
   bool showBackToTop = false;
 
-  static String savedFilter = 'Today';
-  String selectedFilter = savedFilter;
+  static const String customerFilterKey =
+      'customer_notification_filter';
+
+  String selectedFilter = 'Today';
 
   List<Map<String, dynamic>> notifications = [];
   Map<String, dynamic>? currentCustomer;
+
+  Future<void> loadSavedFilter() async {
+    try {
+      final preferences =
+      await SharedPreferences.getInstance();
+
+      final savedFilter =
+      preferences.getString(customerFilterKey);
+
+      if (!mounted) return;
+
+      setState(() {
+        selectedFilter =
+        savedFilter == 'All'
+            ? 'All'
+            : 'Today';
+      });
+    } catch (error) {
+      debugPrint(
+        'Failed to load customer notification filter: $error',
+      );
+    }
+  }
+
+  Future<void> saveSelectedFilter(
+      String value,
+      ) async {
+    try {
+      final preferences =
+      await SharedPreferences.getInstance();
+
+      await preferences.setString(
+        customerFilterKey,
+        value,
+      );
+    } catch (error) {
+      debugPrint(
+        'Failed to save customer notification filter: $error',
+      );
+    }
+  }
 
   @override
   void initState() {
     super.initState();
 
+    loadSavedFilter();
     loadNotifications();
 
     scrollController.addListener(() {
@@ -650,16 +695,19 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
             tooltip: 'Filter Notifications',
             icon: const Icon(Icons.filter_list),
             initialValue: selectedFilter,
-            onSelected: (value) {
+            onSelected: (value) async {
               setState(() {
                 selectedFilter = value;
-                savedFilter = value;
               });
+
+              await saveSelectedFilter(value);
 
               if (scrollController.hasClients) {
                 scrollController.animateTo(
                   0,
-                  duration: const Duration(milliseconds: 350),
+                  duration: const Duration(
+                    milliseconds: 350,
+                  ),
                   curve: Curves.easeOut,
                 );
               }

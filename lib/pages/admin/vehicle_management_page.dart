@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
+import '../../services/customer_notification_service.dart';
 
 class VehicleManagementPage extends StatefulWidget {
   const VehicleManagementPage({super.key});
@@ -19,12 +23,15 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
   bool showBackToTop = false;
 
   List<Map<String, dynamic>> vehicles = [];
+  RealtimeChannel? vehiclesRealtimeChannel;
+  bool isRealtimeRefreshing = false;
 
   @override
   void initState() {
     super.initState();
 
     fetchVehicles();
+    setupRealtimeSubscription();
 
     scrollController.addListener(() {
       if (scrollController.offset > 350 && !showBackToTop) {
@@ -37,6 +44,14 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
 
   @override
   void dispose() {
+    final channel = vehiclesRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     super.dispose();
   }
@@ -49,22 +64,88 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
     );
   }
 
-  Future<void> fetchVehicles() async {
-    setState(() => isLoading = true);
+  Future<void> fetchVehicles({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
       final response = await supabase
           .from('vehicles')
           .select()
-          .order('created_at', ascending: false);
+          .order(
+        'created_at',
+        ascending: false,
+      );
+
+      if (!mounted) return;
 
       setState(() {
-        vehicles = List<Map<String, dynamic>>.from(response);
+        vehicles = List<Map<String, dynamic>>.from(
+          response,
+        );
       });
     } catch (error) {
-      showMessage('Failed to load vehicles: $error');
+      if (showLoading) {
+        showMessage(
+          'Failed to load vehicles: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime vehicle refresh failed: $error',
+        );
+      }
     } finally {
-      if (mounted) setState(() => isLoading = false);
+      if (showLoading && mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+  void setupRealtimeSubscription() {
+    if (vehiclesRealtimeChannel != null) {
+      return;
+    }
+
+    vehiclesRealtimeChannel = supabase
+        .channel(
+      'admin-vehicles-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'vehicles',
+      callback: (payload) {
+        debugPrint(
+          'Admin vehicle changed: '
+              '${payload.eventType}',
+        );
+
+        refreshVehiclesFromRealtime();
+      },
+    )
+        .subscribe();
+  }
+
+  Future<void> refreshVehiclesFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await fetchVehicles(
+        showLoading: false,
+      );
+    } finally {
+      isRealtimeRefreshing = false;
     }
   }
 
@@ -109,34 +190,14 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
     required String customerId,
     required String title,
     required String message,
-  }) async {
-    try {
-      final customer = await supabase
-          .from('customers')
-          .select('fcm_token')
-          .eq('customer_id', customerId)
-          .maybeSingle();
-
-      final token = customer?['fcm_token']?.toString();
-
-      if (token == null || token.isEmpty) {
-        debugPrint('No FCM token found for customer $customerId');
-        return;
-      }
-
-      final response = await supabase.functions.invoke(
-        'send-fcm',
-        body: {
-          'token': token,
-          'title': title,
-          'body': message,
-        },
-      );
-
-      debugPrint('Vehicle claim FCM response: ${response.data}');
-    } catch (error) {
-      debugPrint('Failed to send vehicle claim FCM: $error');
-    }
+    Map<String, dynamic>? data,
+  }) {
+    return CustomerNotificationService.sendToAllDevices(
+      customerId: customerId,
+      title: title,
+      message: message,
+      data: data,
+    );
   }
 
   Future<void> createVehicleClaimNotification({
@@ -153,13 +214,20 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
       'vehicle_id': vehicle['vehicle_id'],
       'title': title,
       'message': message,
+      'notification_type': 'vehicle_claim',
+      'target_page': 'my_vehicles',
       'is_read': false,
     });
 
     await sendFcmPushNotification(
-      customerId: customerId,
+      customerId: customerId.toString(),
       title: title,
       message: message,
+      data: {
+        'notification_type': 'vehicle_claim',
+        'target_page': 'my_vehicles',
+        'vehicle_id': vehicle['vehicle_id'],
+      },
     );
   }
 
@@ -1291,7 +1359,7 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-        onRefresh: fetchVehicles,
+        onRefresh: () => fetchVehicles(),
         child: CustomScrollView(
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
