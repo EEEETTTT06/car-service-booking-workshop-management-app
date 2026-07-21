@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
@@ -19,11 +23,16 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
   bool showBackToTop = false;
 
   List<Map<String, dynamic>> customers = [];
+  RealtimeChannel? customersRealtimeChannel;
+  Timer? realtimeRefreshTimer;
+  bool isRealtimeRefreshing = false;
 
   @override
   void initState() {
     super.initState();
+
     fetchCustomers();
+    setupRealtimeSubscription();
 
     scrollController.addListener(() {
       if (scrollController.offset > 350 && !showBackToTop) {
@@ -36,6 +45,17 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
 
   @override
   void dispose() {
+    realtimeRefreshTimer?.cancel();
+
+    final channel =
+        customersRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     super.dispose();
   }
@@ -48,26 +68,111 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
     );
   }
 
-  Future<void> fetchCustomers() async {
-    setState(() => isLoading = true);
+  Future<void> fetchCustomers({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
       final response = await supabase
           .from('customers')
           .select()
-          .order('created_at', ascending: false);
+          .order(
+        'created_at',
+        ascending: false,
+      );
 
-      if (mounted) {
+      if (!mounted) return;
+
+      setState(() {
+        customers =
+        List<Map<String, dynamic>>.from(
+          response,
+        );
+      });
+    } catch (error) {
+      if (showLoading) {
+        showMessage(
+          'Failed to load customers: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime customer refresh failed: $error',
+        );
+      }
+    } finally {
+      if (showLoading && mounted) {
         setState(() {
-          customers = List<Map<String, dynamic>>.from(response);
+          isLoading = false;
         });
       }
-    } catch (error) {
-      showMessage('Failed to load customers: $error');
+    }
+  }
+
+  void setupRealtimeSubscription() {
+    if (customersRealtimeChannel != null) {
+      return;
+    }
+
+    customersRealtimeChannel = supabase
+        .channel(
+      'admin-customers-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'customers',
+      callback: (payload) {
+        debugPrint(
+          'Admin customer changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'vehicles',
+      callback: (payload) {
+        debugPrint(
+          'Customer vehicle relationship changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .subscribe();
+  }
+
+  void scheduleRealtimeRefresh() {
+    realtimeRefreshTimer?.cancel();
+
+    realtimeRefreshTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshCustomersFromRealtime,
+    );
+  }
+
+  Future<void> refreshCustomersFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await fetchCustomers(
+        showLoading: false,
+      );
     } finally {
-      if (mounted) {
-        setState(() => isLoading = false);
-      }
+      isRealtimeRefreshing = false;
     }
   }
 
@@ -1049,7 +1154,7 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-        onRefresh: fetchCustomers,
+        onRefresh: () => fetchCustomers(),
         child: CustomScrollView(
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),

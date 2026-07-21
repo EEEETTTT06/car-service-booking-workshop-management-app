@@ -544,49 +544,124 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
     }
   }
 
-  Future<void> markCustomerArrived(Map<String, dynamic> booking) async {
+  Future<void> markCustomerArrived(
+      Map<String, dynamic> booking,
+      ) async {
+    final bookingId =
+    booking['booking_id']
+        ?.toString()
+        .trim();
+
+    if (bookingId == null ||
+        bookingId.isEmpty) {
+      showMessage(
+        'Booking information is missing.',
+      );
+      return;
+    }
+
     try {
-      final plate = booking['vehicles']?['plate_number'] ?? 'your vehicle';
-
-      final existing = await supabase
-          .from('pending_services')
-          .select('pending_id')
-          .eq('booking_id', booking['booking_id'])
-          .maybeSingle();
-
-      if (existing != null) {
-        showMessage('Pending service already exists.');
-        return;
-      }
-
-      await supabase.from('bookings').update({
-        'status': 'Arrived',
-      }).eq('booking_id', booking['booking_id']);
-
-      await supabase.from('pending_services').insert({
-        'booking_id': booking['booking_id'],
-        'quotation_id': null,
-        'vehicle_id': booking['vehicle_id'],
-        'customer_id': booking['customer_id'],
-        'service_type': 'Appointment',
-        'note': 'Vehicle is waiting for inspection and repair.',
-        'status': 'Waiting Fix',
-        'created_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-
-      await createBookingNotification(
-        booking: booking,
-        title: 'Vehicle Arrived',
-        message:
-        'Your vehicle $plate has arrived at the workshop and is waiting for inspection and repair.',
+      final rpcResult = await supabase.rpc(
+        'mark_booking_arrived',
+        params: {
+          'p_booking_id': bookingId,
+        },
       );
 
-      await fetchBookings();
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid arrival information was returned.',
+        );
+      }
 
-      showMessage('Customer marked as arrived and moved to pending service.');
+      final arrivalResult =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      final pendingId =
+      arrivalResult['pending_id']
+          ?.toString();
+
+      if (pendingId == null ||
+          pendingId.isEmpty) {
+        throw Exception(
+          'Pending Service ID was not returned.',
+        );
+      }
+
+      final customerId =
+          arrivalResult['customer_id'] ??
+              booking['customer_id'];
+
+      final vehicleId =
+          arrivalResult['vehicle_id'] ??
+              booking['vehicle_id'];
+
+      final notificationBooking =
+      Map<String, dynamic>.from(
+        booking,
+      );
+
+      notificationBooking['booking_id'] =
+          arrivalResult['booking_id'] ??
+              bookingId;
+
+      notificationBooking['customer_id'] =
+          customerId;
+
+      notificationBooking['vehicle_id'] =
+          vehicleId;
+
+
+      final plate =
+          booking['vehicles']
+          ?['plate_number']
+              ?.toString() ??
+              'your vehicle';
+
+      if (customerId != null) {
+        try {
+          await createBookingNotification(
+            booking: notificationBooking,
+            title: 'Vehicle Arrived',
+            message:
+            'Your vehicle $plate has arrived at the workshop and is waiting for inspection and repair.',
+          );
+        } catch (
+        notificationError,
+        stackTrace
+        ) {
+          debugPrint(
+            'Vehicle arrival notification failed: '
+                '$notificationError',
+          );
+
+          debugPrint(
+            stackTrace.toString(),
+          );
+        }
+      }
+
+      await fetchBookings(
+        showLoading: false,
+      );
+
+      showMessage(
+        'Customer marked as arrived and moved to pending service.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
+      );
+
+      await fetchBookings(
+        showLoading: false,
+      );
     } catch (error) {
-      showMessage('Failed to mark customer arrived: $error');
+      showMessage(
+        'Failed to mark customer arrived: $error',
+      );
     }
   }
 

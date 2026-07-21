@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 
@@ -21,6 +25,9 @@ class _AdminAppointmentCalendarPageState
 
   Map<String, Map<String, dynamic>> dateSettings = {};
   Map<String, int> bookingCounts = {};
+  RealtimeChannel? appointmentCalendarRealtimeChannel;
+  Timer? realtimeRefreshTimer;
+  bool isRealtimeRefreshing = false;
 
   final DateTime today = DateTime.now();
 
@@ -33,22 +40,58 @@ class _AdminAppointmentCalendarPageState
   @override
   void initState() {
     super.initState();
+
     loadCalendarData();
+    setupRealtimeSubscription();
   }
 
-  Future<void> loadCalendarData({bool showLoading = true}) async {
-    if (showLoading) {
-      setState(() => isLoading = true);
-    } else {
-      setState(() => isMonthRefreshing = true);
+  @override
+  void dispose() {
+    realtimeRefreshTimer?.cancel();
+
+    final channel =
+        appointmentCalendarRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
+    super.dispose();
+  }
+  Future<void> loadCalendarData({
+    bool showLoading = true,
+    bool showMonthProgress = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    } else if (showMonthProgress && mounted) {
+      setState(() {
+        isMonthRefreshing = true;
+      });
     }
 
     try {
       await fetchDefaultLimit();
       await fetchDateSettings();
       await fetchBookingCounts();
+
+      if (mounted) {
+        setState(() {});
+      }
     } catch (error) {
-      showMessage('Failed to load calendar data: $error');
+      if (showLoading || showMonthProgress) {
+        showMessage(
+          'Failed to load calendar data: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime admin calendar refresh failed: $error',
+        );
+      }
     } finally {
       if (!mounted) return;
 
@@ -112,6 +155,82 @@ class _AdminAppointmentCalendarPageState
     bookingCounts = temp;
   }
 
+  void setupRealtimeSubscription() {
+    if (appointmentCalendarRealtimeChannel != null) {
+      return;
+    }
+
+    appointmentCalendarRealtimeChannel = supabase
+        .channel(
+      'admin-appointment-calendar-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'appointment_settings',
+      callback: (payload) {
+        debugPrint(
+          'Default appointment setting changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'appointment_date_settings',
+      callback: (payload) {
+        debugPrint(
+          'Appointment date setting changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'bookings',
+      callback: (payload) {
+        debugPrint(
+          'Appointment calendar booking changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleRealtimeRefresh();
+      },
+    )
+        .subscribe();
+  }
+
+  void scheduleRealtimeRefresh() {
+    realtimeRefreshTimer?.cancel();
+
+    realtimeRefreshTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshCalendarFromRealtime,
+    );
+  }
+
+  Future<void> refreshCalendarFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await loadCalendarData(
+        showLoading: false,
+        showMonthProgress: false,
+      );
+    } finally {
+      isRealtimeRefreshing = false;
+    }
+  }
   Future<void> updateDefaultLimit(int limit) async {
     try {
       await supabase.from('appointment_settings').update({

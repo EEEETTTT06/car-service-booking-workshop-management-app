@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'choose_service_type_page.dart';
 import '../../services/supabase_service.dart';
 
@@ -28,12 +32,16 @@ class _CustomerBookingCalendarPageState
   int dailyLimit = 10;
   Map<String, int> bookedCount = {};
   Map<String, Map<String, dynamic>> dateSettings = {};
+  RealtimeChannel? calendarRealtimeChannel;
+  Timer? calendarRealtimeTimer;
+  bool isCalendarRealtimeRefreshing = false;
 
   @override
   void initState() {
     super.initState();
 
     loadCalendarData();
+    setupCalendarRealtimeSubscription();
 
     scrollController.addListener(() {
       if (scrollController.offset > 180 && !showBackToTop) {
@@ -50,6 +58,16 @@ class _CustomerBookingCalendarPageState
 
   @override
   void dispose() {
+    calendarRealtimeTimer?.cancel();
+
+    final channel = calendarRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     super.dispose();
   }
@@ -62,18 +80,50 @@ class _CustomerBookingCalendarPageState
     );
   }
 
-  Future<void> loadCalendarData() async {
-    setState(() => isLoading = true);
+  Future<void> loadCalendarData({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
       await fetchDefaultDailyLimit();
       await fetchDateSettings();
       await fetchBookingCounts();
-    } catch (error) {
-      showMessage('Failed to load calendar: $error');
-    } finally {
+
+      // Remove the selected date when it becomes
+      // closed, full, past, or today after Realtime refresh.
+      if (selectedDate != null) {
+        final date = selectedDate!;
+
+        if (isUnavailableDate(date) ||
+            isClosed(date) ||
+            isFull(date)) {
+          selectedDate = null;
+        }
+      }
+
       if (mounted) {
-        setState(() => isLoading = false);
+        setState(() {});
+      }
+    } catch (error) {
+      if (showLoading) {
+        showMessage(
+          'Failed to load calendar: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime calendar refresh failed: $error',
+        );
+      }
+    } finally {
+      if (showLoading && mounted) {
+        setState(() {
+          isLoading = false;
+        });
       }
     }
   }
@@ -111,24 +161,127 @@ class _CustomerBookingCalendarPageState
   }
 
   Future<void> fetchBookingCounts() async {
-    final firstDay = DateTime(currentMonth.year, currentMonth.month, 1);
-    final lastDay = DateTime(currentMonth.year, currentMonth.month + 1, 0);
+    final firstDay = DateTime(
+      currentMonth.year,
+      currentMonth.month,
+      1,
+    );
+
+    final lastDay = DateTime(
+      currentMonth.year,
+      currentMonth.month + 1,
+      0,
+    );
 
     final response = await supabase
         .from('bookings')
-        .select('appointment_date, status')
-        .gte('appointment_date', formatDateKey(firstDay))
-        .lte('appointment_date', formatDateKey(lastDay))
-        .neq('status', 'Cancelled');
+        .select(
+      'appointment_date, status',
+    )
+        .gte(
+      'appointment_date',
+      formatDateKey(firstDay),
+    )
+        .lte(
+      'appointment_date',
+      formatDateKey(lastDay),
+    )
+        .neq(
+      'status',
+      'Cancelled',
+    )
+        .neq(
+      'status',
+      'Rejected',
+    );
 
     final Map<String, int> temp = {};
 
     for (final item in response) {
-      final date = item['appointment_date'].toString();
+      final date =
+      item['appointment_date'].toString();
+
       temp[date] = (temp[date] ?? 0) + 1;
     }
 
     bookedCount = temp;
+  }
+
+  void setupCalendarRealtimeSubscription() {
+    if (calendarRealtimeChannel != null) {
+      return;
+    }
+
+    calendarRealtimeChannel = supabase
+        .channel(
+      'customer-booking-calendar-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'bookings',
+      callback: (payload) {
+        debugPrint(
+          'Calendar booking changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleCalendarRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'appointment_settings',
+      callback: (payload) {
+        debugPrint(
+          'Default appointment setting changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleCalendarRealtimeRefresh();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'appointment_date_settings',
+      callback: (payload) {
+        debugPrint(
+          'Appointment date setting changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleCalendarRealtimeRefresh();
+      },
+    )
+        .subscribe();
+  }
+
+  void scheduleCalendarRealtimeRefresh() {
+    calendarRealtimeTimer?.cancel();
+
+    calendarRealtimeTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshCalendarFromRealtime,
+    );
+  }
+
+  Future<void> refreshCalendarFromRealtime() async {
+    if (!mounted ||
+        isCalendarRealtimeRefreshing) {
+      return;
+    }
+
+    isCalendarRealtimeRefreshing = true;
+
+    try {
+      await loadCalendarData(
+        showLoading: false,
+      );
+    } finally {
+      isCalendarRealtimeRefreshing = false;
+    }
   }
 
   String formatDateKey(DateTime date) {
@@ -483,7 +636,7 @@ class _CustomerBookingCalendarPageState
         child: CircularProgressIndicator(),
       )
           : RefreshIndicator(
-        onRefresh: loadCalendarData,
+        onRefresh: () => loadCalendarData(),
         child: CustomScrollView(
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),

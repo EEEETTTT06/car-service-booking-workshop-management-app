@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
@@ -17,10 +21,15 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
   bool showBackToTop = false;
   List<Map<String, dynamic>> services = [];
 
+  RealtimeChannel? servicesRealtimeChannel;
+  bool isRealtimeRefreshing = false;
+
   @override
   void initState() {
     super.initState();
+
     fetchServices();
+    setupRealtimeSubscription();
 
     scrollController.addListener(() {
       if (scrollController.offset > 350 && !showBackToTop) {
@@ -33,6 +42,14 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
 
   @override
   void dispose() {
+    final channel = servicesRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     scrollController.dispose();
     super.dispose();
   }
@@ -45,22 +62,88 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
     );
   }
 
-  Future<void> fetchServices() async {
-    setState(() => isLoading = true);
+  Future<void> fetchServices({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
       final response = await supabase
           .from('services')
           .select()
-          .order('created_at', ascending: false);
+          .order(
+        'created_at',
+        ascending: false,
+      );
+
+      if (!mounted) return;
 
       setState(() {
-        services = List<Map<String, dynamic>>.from(response);
+        services = List<Map<String, dynamic>>.from(
+          response,
+        );
       });
     } catch (error) {
-      showMessage('Failed to load services: $error');
+      if (showLoading) {
+        showMessage(
+          'Failed to load services: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime service refresh failed: $error',
+        );
+      }
     } finally {
-      if (mounted) setState(() => isLoading = false);
+      if (showLoading && mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+  void setupRealtimeSubscription() {
+    if (servicesRealtimeChannel != null) {
+      return;
+    }
+
+    servicesRealtimeChannel = supabase
+        .channel(
+      'admin-services-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'services',
+      callback: (payload) {
+        debugPrint(
+          'Admin service changed: '
+              '${payload.eventType}',
+        );
+
+        refreshServicesFromRealtime();
+      },
+    )
+        .subscribe();
+  }
+
+  Future<void> refreshServicesFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await fetchServices(
+        showLoading: false,
+      );
+    } finally {
+      isRealtimeRefreshing = false;
     }
   }
 
@@ -824,7 +907,7 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: fetchServices,
+        onRefresh: () => fetchServices(),
         child: CustomScrollView(
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),

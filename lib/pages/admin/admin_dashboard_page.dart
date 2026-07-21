@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'admin_sidebar.dart';
 import 'admin_quotations_page.dart';
 import 'pending_service_page.dart';
@@ -33,13 +37,32 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   List<Map<String, dynamic>> vehicles = [];
   List<Map<String, dynamic>> vehicleChartData = [];
 
+  RealtimeChannel? dashboardRealtimeChannel;
+  Timer? realtimeRefreshTimer;
+  bool isRealtimeRefreshing = false;
+
   @override
   void initState() {
     super.initState();
+
     setDefaultMonth();
     loadDashboardData();
+    setupRealtimeSubscription();
   }
+  @override
+  void dispose() {
+    realtimeRefreshTimer?.cancel();
 
+    final channel = dashboardRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
+    super.dispose();
+  }
   void setDefaultMonth() {
     if (rememberedSelectedMonth != null &&
         rememberedSelectedMonth!.isNotEmpty) {
@@ -55,17 +78,69 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     rememberedSelectedMonth = selectedMonth;
   }
 
-  Future<void> loadDashboardData() async {
-    setState(() => isLoading = true);
+  Future<void> loadDashboardData({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
       await fetchDashboardCounts();
       await fetchVehicles();
+
+      final months = <String>{};
+
+      for (final vehicle in vehicles) {
+        final createdAt = vehicle['created_at'];
+
+        if (createdAt == null) continue;
+
+        final date =
+        DateTime.parse(createdAt.toString()).toLocal();
+
+        months.add(
+          '${getMonthName(date.month)} ${date.year}',
+        );
+      }
+
+      if (months.isNotEmpty &&
+          !months.contains(selectedMonth)) {
+        final sortedMonths = months.toList();
+
+        sortedMonths.sort((a, b) {
+          return parseMonthYear(b).compareTo(
+            parseMonthYear(a),
+          );
+        });
+
+        selectedMonth = sortedMonths.first;
+        rememberedSelectedMonth = selectedMonth;
+      }
+
       generateVehicleChartData();
+
+      if (mounted) {
+        setState(() {});
+      }
     } catch (error) {
-      showMessage('Failed to load dashboard: $error');
+      if (showLoading) {
+        showMessage(
+          'Failed to load dashboard: $error',
+        );
+      } else {
+        debugPrint(
+          'Realtime dashboard refresh failed: $error',
+        );
+      }
     } finally {
-      if (mounted) setState(() => isLoading = false);
+      if (showLoading && mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -88,6 +163,105 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         .order('created_at', ascending: false);
 
     vehicles = List<Map<String, dynamic>>.from(response);
+  }
+
+  void setupRealtimeSubscription() {
+    if (dashboardRealtimeChannel != null) {
+      return;
+    }
+
+    dashboardRealtimeChannel = supabase
+        .channel(
+      'admin-dashboard-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'bookings',
+      callback: (payload) {
+        scheduleDashboardRefresh(
+          'Booking',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'customers',
+      callback: (payload) {
+        scheduleDashboardRefresh(
+          'Customer',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'services',
+      callback: (payload) {
+        scheduleDashboardRefresh(
+          'Service',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'service_records',
+      callback: (payload) {
+        scheduleDashboardRefresh(
+          'Service record',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'vehicles',
+      callback: (payload) {
+        scheduleDashboardRefresh(
+          'Vehicle',
+          payload.eventType,
+        );
+      },
+    )
+        .subscribe();
+  }
+
+  void scheduleDashboardRefresh(
+      String source,
+      dynamic eventType,
+      ) {
+    debugPrint(
+      'Dashboard $source changed: $eventType',
+    );
+
+    realtimeRefreshTimer?.cancel();
+
+    realtimeRefreshTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshDashboardFromRealtime,
+    );
+  }
+
+  Future<void> refreshDashboardFromRealtime() async {
+    if (!mounted || isRealtimeRefreshing) {
+      return;
+    }
+
+    isRealtimeRefreshing = true;
+
+    try {
+      await loadDashboardData(
+        showLoading: false,
+      );
+    } finally {
+      isRealtimeRefreshing = false;
+    }
   }
 
   List<String> get availableMonths {
@@ -284,7 +458,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-        onRefresh: loadDashboardData,
+        onRefresh: () => loadDashboardData(),
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 22),

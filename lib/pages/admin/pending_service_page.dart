@@ -113,7 +113,7 @@ class _PendingServicePageState extends State<PendingServicePage> {
           .select('''
           *,
           vehicles(plate_number, car_model),
-          customers(name, phone, email, fcm_token),
+          customers(name, phone, email),
           quotations(
             quotation_id,
             status,
@@ -308,15 +308,6 @@ class _PendingServicePageState extends State<PendingServicePage> {
       data: data,
     );
   }
-  Future<bool> serviceRecordAlreadyExists(String quotationId) async {
-    final response = await supabase
-        .from('service_records')
-        .select('record_id')
-        .eq('quotation_id', quotationId)
-        .maybeSingle();
-
-    return response != null;
-  }
   double calculateItemsTotal(List items) {
     double total = 0;
 
@@ -329,213 +320,170 @@ class _PendingServicePageState extends State<PendingServicePage> {
 
     return total;
   }
-  Future<bool> createAutomaticServiceRecord(
-      Map<String, dynamic> service,
-      ) async {
-    final quotationId = service['quotation_id']?.toString();
-
-    // No quotation means this may be a walk-in service.
-    // Keep it for manual service-record creation.
-    if (quotationId == null || quotationId.isEmpty) {
-      return false;
-    }
-
-    final quotation = service['quotations'];
-
-    if (quotation == null) {
-      throw Exception('Linked quotation was not found.');
-    }
-
-    if (quotation['status'] != 'Confirmed') {
-      throw Exception(
-        'The quotation must be confirmed before completing the service.',
-      );
-    }
-
-    final exists = await serviceRecordAlreadyExists(quotationId);
-
-    if (exists) {
-      throw Exception(
-        'A service record already exists for this quotation.',
-      );
-    }
-
-    final quotationItems =
-        quotation['quotation_items'] as List? ?? [];
-
-    if (quotationItems.isEmpty) {
-      throw Exception(
-        'The confirmed quotation does not contain any items.',
-      );
-    }
-
-    final total = calculateItemsTotal(quotationItems);
-
-    final record = await supabase.from('service_records').insert({
-      'vehicle_id': service['vehicle_id'],
-      'customer_id': service['customer_id'],
-      'quotation_id': quotationId,
-      'booking_id': service['booking_id'],
-      'problem_description':
-      quotation['problem_description'] ?? service['note'],
-      'service_action':
-      'Service completed according to the confirmed quotation.',
-      'total_price': total,
-      'status': 'Completed',
-    }).select().single();
-
-    for (final item in quotationItems) {
-      await supabase.from('service_record_items').insert({
-        'record_id': record['record_id'],
-        'item_name': item['item_name'],
-        'quantity':
-        int.tryParse(item['quantity'].toString()) ?? 1,
-        'price':
-        double.tryParse(item['price'].toString()) ?? 0,
-      });
-    }
-
-    return true;
-  }
   Future<void> updatePendingStatus(
       Map<String, dynamic> service,
       String newStatus,
       ) async {
+    final pendingId =
+    service['pending_id']
+        ?.toString()
+        .trim();
+
+    if (pendingId == null ||
+        pendingId.isEmpty) {
+      showMessage(
+        'Pending service information is missing.',
+      );
+      return;
+    }
+
+    if (!statusList.contains(newStatus)) {
+      showMessage(
+        'The selected service status is invalid.',
+      );
+      return;
+    }
+
     try {
-      final currentStatus =
-          service['status']?.toString() ??
-              'Waiting Fix';
-
-      final quotationId =
-      service['quotation_id']?.toString();
-
-      final quotation = service['quotations'];
-
-      if (currentStatus == 'Completed') {
-        showMessage(
-          'A completed service cannot be changed.',
-        );
-        return;
-      }
-
-      if (currentStatus == 'Waiting Fix' &&
-          newStatus == 'Completed') {
-        showMessage(
-          'Please change the service to In Progress before completing it.',
-        );
-        return;
-      }
-
-      if ((newStatus == 'In Progress' ||
-          newStatus == 'Completed') &&
-          quotationId != null &&
-          quotationId.isNotEmpty) {
-        if (quotation == null ||
-            quotation['status'] != 'Confirmed') {
-          showMessage(
-            'The customer must confirm the quotation before service can begin.',
-          );
-          return;
-        }
-      }
-
-      final vehicle = service['vehicles'] ?? {};
-      final plate =
-          vehicle['plate_number'] ?? 'your vehicle';
-
-      final customerId = service['customer_id'];
-
-      final title = newStatus == 'Completed'
-          ? 'Vehicle Service Completed'
-          : 'Vehicle Status Updated';
-
-      final message =
-      getNotificationMessage(
-        newStatus,
-        plate,
+      final rpcResult = await supabase.rpc(
+        'update_pending_service_status',
+        params: {
+          'p_pending_id': pendingId,
+          'p_new_status': newStatus,
+        },
       );
 
-      bool automaticRecordCreated = false;
-
-      if (newStatus == 'Completed') {
-        automaticRecordCreated =
-        await createAutomaticServiceRecord(
-          service,
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid pending service information was returned.',
         );
       }
 
-      if (service['booking_id'] != null &&
-          newStatus == 'Completed') {
-        await supabase.from('bookings').update({
-          'status': 'Completed',
-        }).eq(
-          'booking_id',
-          service['booking_id'],
-        );
-      }
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
 
-      if (automaticRecordCreated) {
-        await supabase
-            .from('pending_services')
-            .delete()
-            .eq(
-          'pending_id',
-          service['pending_id'],
-        );
-      } else {
-        await supabase.from('pending_services').update({
-          'status': newStatus,
-          'updated_at':
-          DateTime.now().toIso8601String(),
-        }).eq(
-          'pending_id',
-          service['pending_id'],
-        );
-      }
+      final automaticRecordCreated =
+          result['automatic_record_created'] ==
+              true;
 
-      if (customerId != null) {
-        final notificationTitle =
-        automaticRecordCreated
-            ? 'Service Record Available'
-            : title;
+      final recordId =
+      result['record_id']
+          ?.toString();
 
-        final notificationMessage =
-        automaticRecordCreated
-            ? 'The service for vehicle $plate has been completed. Your service record is now available.'
-            : message;
-        final targetPage = automaticRecordCreated
-            ? 'service_records'
-            : 'my_bookings';
-        await supabase.from('notifications').insert({
-          'customer_id': customerId,
-          'vehicle_id': service['vehicle_id'],
-          'booking_id': service['booking_id'],
-          'quotation_id': service['quotation_id'],
-          'pending_id': automaticRecordCreated
-              ? null
-              : service['pending_id'],
-          'title': notificationTitle,
-          'message': notificationMessage,
-          'notification_type': 'service',
-          'target_page': targetPage,
-          'is_read': false,
-        });
+      final returnedPendingId =
+      result['pending_id']
+          ?.toString();
 
-        await sendFcmPushNotification(
-          customerId: customerId.toString(),
-          title: notificationTitle,
-          message: notificationMessage,
-          data: {
-            'notification_type': 'service',
+      final customerId =
+      result['customer_id']
+          ?.toString();
+
+      final vehicleId =
+      result['vehicle_id']
+          ?.toString();
+
+      final bookingId =
+      result['booking_id']
+          ?.toString();
+
+      final quotationId =
+      result['quotation_id']
+          ?.toString();
+
+      final plateValue =
+      result['plate_number']
+          ?.toString()
+          .trim();
+
+      final plate =
+      plateValue == null ||
+          plateValue.isEmpty
+          ? 'your vehicle'
+          : plateValue;
+
+      /*
+     * Notification runs after the transaction.
+     * Notification failure will not undo the
+     * completed service operation.
+     */
+      if (customerId != null &&
+          customerId.isNotEmpty) {
+        try {
+          final String title;
+          final String message;
+          final String targetPage;
+
+          if (automaticRecordCreated) {
+            title = 'Service Record Available';
+            message =
+            'The service for vehicle $plate has been completed. Your service record is now available.';
+            targetPage = 'service_records';
+          } else if (newStatus == 'Completed') {
+            title = 'Vehicle Service Completed';
+            message =
+            'Your vehicle $plate service has been completed.';
+            targetPage = 'my_bookings';
+          } else {
+            title = 'Vehicle Status Updated';
+            message = getNotificationMessage(
+              newStatus,
+              plate,
+            );
+            targetPage = 'my_bookings';
+          }
+
+          await supabase
+              .from('notifications')
+              .insert({
+            'customer_id': customerId,
+            'vehicle_id': vehicleId,
+            'booking_id': bookingId,
+            'quotation_id': quotationId,
+            'title': title,
+            'message': message,
+            'notification_type':
+            'service',
             'target_page': targetPage,
-            'vehicle_id': service['vehicle_id'],
-            'booking_id': service['booking_id'],
-            'quotation_id': service['quotation_id'],
-            'pending_id': automaticRecordCreated
-                ? null
-                : service['pending_id'],
-          },
-        );
+            'is_read': false,
+          });
+
+          await sendFcmPushNotification(
+            customerId: customerId,
+            title: title,
+            message: message,
+            data: {
+              'notification_type':
+              'service',
+              'target_page': targetPage,
+              if (recordId != null)
+                'record_id': recordId,
+              if (returnedPendingId != null)
+                'pending_id':
+                returnedPendingId,
+              if (vehicleId != null)
+                'vehicle_id': vehicleId,
+              if (bookingId != null)
+                'booking_id': bookingId,
+              if (quotationId != null)
+                'quotation_id':
+                quotationId,
+            },
+          );
+        } catch (
+        notificationError,
+        stackTrace
+        ) {
+          debugPrint(
+            'Pending service notification failed: '
+                '$notificationError',
+          );
+
+          debugPrint(
+            stackTrace.toString(),
+          );
+        }
       }
 
       await fetchPendingServices();
@@ -553,6 +501,12 @@ class _PendingServicePageState extends State<PendingServicePage> {
           'Service status updated to $newStatus.',
         );
       }
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
+      );
+
+      await fetchPendingServices();
     } catch (error) {
       showMessage(
         'Failed to update status: $error',
@@ -563,62 +517,58 @@ class _PendingServicePageState extends State<PendingServicePage> {
   Future<void> deletePendingService(
       Map<String, dynamic> service,
       ) async {
+    final pendingId =
+    service['pending_id']
+        ?.toString()
+        .trim();
+
+    if (pendingId == null ||
+        pendingId.isEmpty) {
+      showMessage(
+        'Pending service information is missing.',
+      );
+      return;
+    }
+
     try {
-      final quotationId =
-      service['quotation_id']?.toString();
-
-      final status =
-          service['status']?.toString() ??
-              'Waiting Fix';
-
-      if (quotationId != null &&
-          quotationId.isNotEmpty) {
-        showMessage(
-          'This pending service is linked to a quotation and cannot be deleted.',
-        );
-        return;
-      }
-
-      if (status == 'In Progress') {
-        showMessage(
-          'An in-progress service cannot be deleted.',
-        );
-        return;
-      }
-
-      if (status == 'Completed') {
-        showMessage(
-          'Create the service record before removing this completed service.',
-        );
-        return;
-      }
-
-      final bookingId = service['booking_id'];
-
-      await supabase
-          .from('pending_services')
-          .delete()
-          .eq(
-        'pending_id',
-        service['pending_id'],
+      final rpcResult = await supabase.rpc(
+        'delete_pending_service',
+        params: {
+          'p_pending_id': pendingId,
+        },
       );
 
-      if (bookingId != null) {
-        await supabase.from('bookings').update({
-          'status': 'Booked',
-        }).eq(
-          'booking_id',
-          bookingId,
-        ).eq(
-          'status',
-          'Arrived',
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid deletion result was returned.',
         );
       }
 
-      await fetchPendingServices();
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['deleted'] != true) {
+        throw Exception(
+          'The pending service was not deleted.',
+        );
+      }
+
+      await fetchPendingServices(
+        showLoading: false,
+      );
 
       showMessage(
         'Pending service deleted successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
+      );
+
+      await fetchPendingServices(
+        showLoading: false,
       );
     } catch (error) {
       showMessage(
@@ -1061,10 +1011,18 @@ class _PendingServicePageState extends State<PendingServicePage> {
                     child: Text(itemStatus),
                   );
                 }).toList(),
-                onChanged: (value) async {
-                  if (value == null || value == status) return;
+                onChanged: isCompleted
+                    ? null
+                    : (value) async {
+                  if (value == null ||
+                      value == status) {
+                    return;
+                  }
 
-                  await updatePendingStatus(service, value);
+                  await updatePendingStatus(
+                    service,
+                    value,
+                  );
                 },
               ),
 
@@ -1208,13 +1166,19 @@ class _PendingServicePageState extends State<PendingServicePage> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          const NotificationBell(
+            isAdmin: true,
+          ),
           IconButton(
             onPressed: () {
               AdminSidebar.show(context);
             },
             icon: const CircleAvatar(
               backgroundColor: Colors.white,
-              child: Icon(Icons.person, color: Color(0xFF339BFF)),
+              child: Icon(
+                Icons.person,
+                color: Color(0xFF339BFF),
+              ),
             ),
           ),
         ],

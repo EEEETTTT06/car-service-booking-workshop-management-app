@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 
@@ -31,11 +35,16 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
   List<Map<String, dynamic>> services = [];
   List<Map<String, dynamic>> selectedServices = [];
 
+  RealtimeChannel? servicesRealtimeChannel;
+  Timer? servicesRealtimeTimer;
+  bool isRefreshingServicesRealtime = false;
+
   @override
   void initState() {
     super.initState();
 
     loadData();
+    setupServicesRealtimeSubscription();
 
     scrollController.addListener(() {
       if (!mounted) return;
@@ -110,14 +119,118 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
     }
   }
 
-  Future<void> fetchServices() async {
+  Future<void> fetchServices({
+    bool refreshUi = false,
+  }) async {
     final response = await supabase
         .from('services')
         .select()
-        .order('service_name', ascending: true);
+        .order(
+      'service_name',
+      ascending: true,
+    );
 
-    services = List<Map<String, dynamic>>.from(response);
+    final latestServices =
+    List<Map<String, dynamic>>.from(
+      response,
+    );
+
+    final latestServicesById = <String, Map<String, dynamic>>{
+      for (final service in latestServices)
+        service['service_id'].toString(): service,
+    };
+
+    final updatedSelectedServices =
+    <Map<String, dynamic>>[];
+
+    for (final selectedService in selectedServices) {
+      final serviceId =
+      selectedService['service_id']?.toString();
+
+      if (serviceId == null) {
+        continue;
+      }
+
+      final latestService =
+      latestServicesById[serviceId];
+
+      if (latestService == null) {
+        continue;
+      }
+
+      if (!isServiceAvailable(latestService)) {
+        continue;
+      }
+
+      updatedSelectedServices.add(
+        latestService,
+      );
+    }
+
+    services = latestServices;
+    selectedServices = updatedSelectedServices;
+
+    if (refreshUi && mounted) {
+      setState(() {});
+    }
   }
+
+  void setupServicesRealtimeSubscription() {
+    if (servicesRealtimeChannel != null) {
+      return;
+    }
+
+    servicesRealtimeChannel = supabase
+        .channel(
+      'customer-service-selection-realtime',
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'services',
+      callback: (payload) {
+        debugPrint(
+          'Customer service list changed: '
+              '${payload.eventType}',
+        );
+
+        scheduleServicesRealtimeRefresh();
+      },
+    )
+        .subscribe();
+  }
+
+  void scheduleServicesRealtimeRefresh() {
+    servicesRealtimeTimer?.cancel();
+
+    servicesRealtimeTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshServicesFromRealtime,
+    );
+  }
+
+  Future<void> refreshServicesFromRealtime() async {
+    if (!mounted ||
+        isRefreshingServicesRealtime) {
+      return;
+    }
+
+    isRefreshingServicesRealtime = true;
+
+    try {
+      await fetchServices(
+        refreshUi: true,
+      );
+    } catch (error) {
+      debugPrint(
+        'Realtime service selection refresh failed: '
+            '$error',
+      );
+    } finally {
+      isRefreshingServicesRealtime = false;
+    }
+  }
+
 
   String get sqlDate {
     if (widget.selectedDate.contains('/')) {
@@ -256,241 +369,150 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
   }
 
   Future<void> confirmBooking() async {
+    if (isSubmitting) return;
+
     if (currentCustomer == null) {
-      showMessage('Customer profile not found.');
+      showMessage(
+        'Customer profile not found.',
+      );
       return;
     }
 
     if (selectedVehicle == null) {
-      showMessage('Please select a vehicle.');
+      showMessage(
+        'Please select a vehicle.',
+      );
       return;
     }
 
     if (selectedServices.isEmpty) {
-      showMessage('Please select at least one service.');
+      showMessage(
+        'Please select at least one service.',
+      );
       return;
     }
 
-    setState(() => isSubmitting = true);
+    final vehicleId =
+    selectedVehicle!['vehicle_id']
+        ?.toString();
+
+    if (vehicleId == null ||
+        vehicleId.isEmpty) {
+      showMessage(
+        'Vehicle information is missing.',
+      );
+      return;
+    }
+
+    final appointmentDate =
+    DateTime.tryParse(sqlDate);
+
+    if (appointmentDate == null) {
+      showMessage(
+        'Invalid appointment date.',
+      );
+      return;
+    }
+
+    final serviceIds = selectedServices
+        .map(
+          (service) =>
+          service['service_id']
+              ?.toString(),
+    )
+        .whereType<String>()
+        .where(
+          (serviceId) =>
+      serviceId.isNotEmpty,
+    )
+        .toList();
+
+    if (serviceIds.isEmpty) {
+      showMessage(
+        'Please select at least one valid service.',
+      );
+      return;
+    }
+
+    setState(() {
+      isSubmitting = true;
+    });
 
     try {
-      final vehicleId =
-      selectedVehicle!['vehicle_id'].toString();
-
-      final selectedAppointmentDate =
-      DateTime.tryParse(sqlDate);
-
-      if (selectedAppointmentDate == null) {
-        showMessage('Invalid appointment date.');
-        return;
-      }
-
-      final now = DateTime.now();
-
-      final today = DateTime(
-        now.year,
-        now.month,
-        now.day,
+      /*
+     * The database RPC performs all booking
+     * checks and inserts the booking together
+     * with its selected services in one
+     * transaction.
+     */
+      final rpcResult = await supabase.rpc(
+        'create_customer_booking',
+        params: {
+          'p_vehicle_id': vehicleId,
+          'p_appointment_date': sqlDate,
+          'p_problem_description':
+          problemController.text.trim(),
+          'p_service_ids': serviceIds,
+        },
       );
 
-      final appointmentDate = DateTime(
-        selectedAppointmentDate.year,
-        selectedAppointmentDate.month,
-        selectedAppointmentDate.day,
-      );
-
-      // Final protection against past or same-day booking.
-      if (!appointmentDate.isAfter(today)) {
-        showMessage(
-          'Same-day or past booking is not available. '
-              'Please select tomorrow or a later date.',
+      if (rpcResult is! Map) {
+        throw Exception(
+          'The booking was created, but the returned booking information is invalid.',
         );
-        return;
       }
 
-      // Check the workshop setting again before saving.
-      final defaultSetting = await supabase
-          .from('appointment_settings')
-          .select('default_daily_limit')
-          .eq('id', 1)
-          .maybeSingle();
-
-      int dateLimit =
-          defaultSetting?['default_daily_limit'] ?? 10;
-
-      final dateSetting = await supabase
-          .from('appointment_date_settings')
-          .select(
-        'daily_limit, is_closed, closed_reason',
-      )
-          .eq('appointment_date', sqlDate)
-          .maybeSingle();
-
-      if (dateSetting != null) {
-        if (dateSetting['is_closed'] == true) {
-          final reason =
-          dateSetting['closed_reason']?.toString();
-
-          showMessage(
-            reason == null || reason.trim().isEmpty
-                ? 'The workshop is closed on this date.'
-                : reason,
-          );
-          return;
-        }
-
-        if (dateSetting['daily_limit'] != null) {
-          dateLimit =
-              int.tryParse(
-                dateSetting['daily_limit'].toString(),
-              ) ??
-                  dateLimit;
-        }
-      }
-
-      // Recheck whether this date has become full.
-      final dateBookingsResponse = await supabase
-          .from('bookings')
-          .select('booking_id, status')
-          .eq('appointment_date', sqlDate);
-
-      final dateBookings =
-      List<Map<String, dynamic>>.from(
-        dateBookingsResponse,
+      final booking =
+      Map<String, dynamic>.from(
+        rpcResult,
       );
 
-      final validDateBookingCount =
-          dateBookings.where((booking) {
-            final status =
-                booking['status']?.toString() ?? '';
+      final bookingId =
+      booking['booking_id']
+          ?.toString();
 
-            return status != 'Cancelled' &&
-                status != 'Rejected';
-          }).length;
-
-      if (validDateBookingCount >= dateLimit) {
-        showMessage(
-          'This date has become fully booked. '
-              'Please select another date.',
+      if (bookingId == null ||
+          bookingId.isEmpty) {
+        throw Exception(
+          'Booking ID was not returned.',
         );
-        return;
       }
 
-      // Prevent duplicate booking for the same vehicle
-      // on the same date.
-      final sameDateResponse = await supabase
-          .from('bookings')
-          .select('booking_id, status')
-          .eq('vehicle_id', vehicleId)
-          .eq('appointment_date', sqlDate);
-
-      final sameDateBookings =
-      List<Map<String, dynamic>>.from(
-        sameDateResponse,
-      );
-
-      final hasDuplicateBooking =
-      sameDateBookings.any((booking) {
-        final status =
-            booking['status']?.toString() ?? '';
-
-        return status != 'Cancelled' &&
-            status != 'Rejected';
-      });
-
-      if (hasDuplicateBooking) {
-        showMessage(
-          'This vehicle already has a booking '
-              'on the selected date.',
-        );
-        return;
-      }
-
-      // Maximum 3 active or future bookings
-      // for the same vehicle.
-      final activeBookingsResponse = await supabase
-          .from('bookings')
-          .select(
-        'booking_id, appointment_date, status',
-      )
-          .eq('vehicle_id', vehicleId)
-          .gte(
-        'appointment_date',
-        '${today.year}-'
-            '${today.month.toString().padLeft(2, '0')}-'
-            '${today.day.toString().padLeft(2, '0')}',
-      );
-
-      final activeBookings =
-      List<Map<String, dynamic>>.from(
-        activeBookingsResponse,
-      );
-
-      final activeBookingCount =
-          activeBookings.where((booking) {
-            final status =
-                booking['status']?.toString() ?? '';
-
-            return status != 'Cancelled' &&
-                status != 'Rejected' &&
-                status != 'Completed';
-          }).length;
-
-      if (activeBookingCount >= 3) {
-        showMessage(
-          'This vehicle already has 3 active or future '
-              'bookings. Please complete or cancel an existing '
-              'booking before creating another one.',
-        );
-        return;
-      }
-
-      final booking = await supabase
-          .from('bookings')
-          .insert({
-        'customer_id':
-        currentCustomer!['customer_id'],
-        'vehicle_id': vehicleId,
-        'appointment_date': sqlDate,
-        'problem_description':
-        problemController.text.trim(),
-        'status': 'Booked',
-      })
-          .select()
-          .single();
-
-      for (final service in selectedServices) {
-        await supabase
-            .from('booking_services')
-            .insert({
-          'booking_id': booking['booking_id'],
-          'service_id': service['service_id'],
-        });
-      }
-
+      /*
+     * Notification failure will not remove the
+     * successfully created booking because the
+     * notification method handles its own errors.
+     */
       await notifyAdminsAboutNewBooking(
         booking: booking,
       );
 
       widget.onBookingConfirmed({
-        'booking_id': booking['booking_id'],
-        'plate': selectedVehicle!['plate_number'],
-        'model': selectedVehicle!['car_model'],
+        'booking_id': bookingId,
+        'plate':
+        selectedVehicle!['plate_number'],
+        'model':
+        selectedVehicle!['car_model'],
         'date': widget.selectedDate,
-        'problem': problemController.text.trim(),
+        'problem':
+        problemController.text.trim(),
         'services': selectedServices
             .map(
               (service) =>
-              service['service_name'].toString(),
+              service['service_name']
+                  .toString(),
         )
             .toList(),
         'estimatedTotal': totalPrice,
-        'status': 'Booked',
+        'status':
+        booking['status'] ?? 'Booked',
       });
 
       if (!mounted) return;
 
-      final navigator = Navigator.of(context);
+      final navigator =
+      Navigator.of(context);
+
       final messenger =
       ScaffoldMessenger.of(context);
 
@@ -498,6 +520,7 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
       navigator.pop();
 
       messenger.hideCurrentSnackBar();
+
       messenger.showSnackBar(
         const SnackBar(
           content: Text(
@@ -505,13 +528,22 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
           ),
         ),
       );
+    } on PostgrestException catch (error) {
+      /*
+     * Display the clear message raised by the
+     * PostgreSQL RPC, such as duplicate booking,
+     * full date, closed workshop, or booking limit.
+     */
+      showMessage(error.message);
     } catch (error) {
       showMessage(
         'Failed to confirm booking: $error',
       );
     } finally {
       if (mounted) {
-        setState(() => isSubmitting = false);
+        setState(() {
+          isSubmitting = false;
+        });
       }
     }
   }
@@ -870,6 +902,16 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
 
   @override
   void dispose() {
+    servicesRealtimeTimer?.cancel();
+
+    final channel = servicesRealtimeChannel;
+
+    if (channel != null) {
+      unawaited(
+        supabase.removeChannel(channel),
+      );
+    }
+
     problemController.dispose();
     scrollController.dispose();
     super.dispose();

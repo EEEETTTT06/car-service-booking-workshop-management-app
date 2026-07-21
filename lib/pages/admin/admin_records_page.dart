@@ -340,15 +340,6 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
         : Colors.orange.shade50;
   }
 
-  Future<bool> quotationRecordExists(String quotationId) async {
-    final response = await supabase
-        .from('service_records')
-        .select('record_id')
-        .eq('quotation_id', quotationId)
-        .maybeSingle();
-
-    return response != null;
-  }
 
   Future<void> sendRecordNotification({
     required String customerId,
@@ -375,10 +366,13 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
   }) async {
     if (isSavingRecord) return;
 
-    final vehicleId = vehicle['vehicle_id'];
-    final customerId = vehicle['customer_id'];
+    final vehicleId =
+    vehicle['vehicle_id']
+        ?.toString()
+        .trim();
 
-    if (vehicleId == null) {
+    if (vehicleId == null ||
+        vehicleId.isEmpty) {
       showMessage(
         'Vehicle information is missing.',
       );
@@ -392,152 +386,240 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
       return;
     }
 
+    String? normalizeOptionalId(
+        String? value,
+        ) {
+      final normalized =
+          value?.trim() ?? '';
+
+      return normalized.isEmpty
+          ? null
+          : normalized;
+    }
+
+    final normalizedQuotationId =
+    normalizeOptionalId(quotationId);
+
+    final normalizedBookingId =
+    normalizeOptionalId(bookingId);
+
+    final normalizedPendingId =
+    normalizeOptionalId(pendingId);
+
+    final normalizedItems =
+    <Map<String, dynamic>>[];
+
+    for (final item in items) {
+      final itemName =
+          item['item_name']
+              ?.toString()
+              .trim() ??
+              '';
+
+      final quantity = int.tryParse(
+        item['quantity'].toString(),
+      );
+
+      final price = double.tryParse(
+        item['price'].toString(),
+      );
+
+    if (itemName.isEmpty) {
+    showMessage(
+    'Every service item must have a name.',
+    );
+    return;
+    }
+
+    if (quantity == null ||
+    quantity <= 0) {
+    showMessage(
+    'Every service item must have a quantity greater than 0.',
+    );
+    return;
+    }
+
+    if (price == null ||
+    price < 0) {
+    showMessage(
+    'Every service item must have a valid price.',
+    );
+    return;
+    }
+
+    normalizedItems.add({
+    'item_name': itemName,
+    'quantity': quantity,
+    'price': price,
+    });
+    }
+
+    if (!mounted) return;
+
     setState(() {
-      isSavingRecord = true;
+    isSavingRecord = true;
     });
 
     try {
-      if (quotationId != null &&
-          quotationId.isNotEmpty) {
-        final exists =
-        await quotationRecordExists(
-          quotationId,
-        );
+    /*
+     * The RPC creates the record and items,
+     * completes the linked booking, and removes
+     * the completed pending service in one
+     * database transaction.
+     */
+    final rpcResult = await supabase.rpc(
+    'create_service_record',
+    params: {
+    'p_vehicle_id': vehicleId,
+    'p_quotation_id':
+    normalizedQuotationId,
+    'p_booking_id':
+    normalizedBookingId,
+    'p_pending_id':
+    normalizedPendingId,
+    'p_problem_description':
+    problem.trim(),
+    'p_service_action':
+    action.trim(),
+    'p_items': normalizedItems,
+    },
+    );
 
-        if (exists) {
-          showMessage(
-            'This quotation already has a service record.',
-          );
-          return;
-        }
-      }
+    if (rpcResult is! Map) {
+    throw Exception(
+    'Invalid service record information was returned.',
+    );
+    }
 
-      final total = calculateTotal(items);
+    final record =
+    Map<String, dynamic>.from(
+    rpcResult,
+    );
 
-      final record = await supabase
-          .from('service_records')
-          .insert({
-        'vehicle_id': vehicleId,
-        'customer_id': customerId,
-        'quotation_id':
-        quotationId?.isEmpty == true
-            ? null
-            : quotationId,
-        'booking_id':
-        bookingId?.isEmpty == true
-            ? null
-            : bookingId,
-        'problem_description':
-        problem.trim().isEmpty
-            ? 'No description'
-            : problem.trim(),
-        'service_action':
-        action.trim().isEmpty
-            ? 'Service completed.'
-            : action.trim(),
-        'total_price': total,
-        'status': 'Completed',
-      })
-          .select()
-          .single();
+    final recordId =
+    record['record_id']
+        ?.toString();
 
-      for (final item in items) {
-        await supabase
-            .from('service_record_items')
-            .insert({
-          'record_id': record['record_id'],
-          'item_name': item['item_name'],
-          'quantity':
-          int.tryParse(
-            item['quantity'].toString(),
-          ) ??
-              1,
-          'price':
-          double.tryParse(
-            item['price'].toString(),
-          ) ??
-              0,
-        });
-      }
+    if (recordId == null ||
+    recordId.isEmpty) {
+    throw Exception(
+    'Service record ID was not returned.',
+    );
+    }
 
-      if (bookingId != null &&
-          bookingId.isNotEmpty) {
-        await supabase.from('bookings').update({
-          'status': 'Completed',
-        }).eq(
-          'booking_id',
-          bookingId,
-        ).neq(
-          'status',
-          'Cancelled',
-        );
-      }
+    final recordCustomerId =
+    record['customer_id']
+        ?.toString();
 
-      if (pendingId != null &&
-          pendingId.isNotEmpty) {
-        await supabase
-            .from('pending_services')
-            .delete()
-            .eq(
-          'pending_id',
-          pendingId,
-        );
-      }
+    final recordVehicleId =
+    record['vehicle_id']
+        ?.toString() ??
+    vehicleId;
 
-      if (customerId != null) {
-        const title = 'Service Record Created';
+    final recordBookingId =
+    record['booking_id']
+        ?.toString();
 
-        const message =
-            'Your vehicle service record has been created and is now available in Service Records.';
+    final recordQuotationId =
+    record['quotation_id']
+        ?.toString();
 
-        await supabase.from('notifications').insert({
-          'customer_id': customerId,
-          'vehicle_id': vehicleId,
-          'booking_id':
-          bookingId?.isEmpty == true
-              ? null
-              : bookingId,
-          'quotation_id':
-          quotationId?.isEmpty == true
-              ? null
-              : quotationId,
-          'title': title,
-          'message': message,
-          'notification_type': 'service',
-          'target_page': 'service_records',
-          'is_read': false,
-        });
+    /*
+     * Notification runs after the database
+     * transaction succeeds. Notification failure
+     * must not remove the completed service record.
+     */
+    if (recordCustomerId != null &&
+    recordCustomerId.isNotEmpty) {
+    try {
+    const title =
+    'Service Record Created';
 
-        await sendRecordNotification(
-          customerId: customerId.toString(),
-          title: title,
-          message: message,
-          data: {
-            'notification_type': 'service',
-            'target_page': 'service_records',
-            'record_id': record['record_id'],
-            'vehicle_id': vehicleId,
-            'booking_id': bookingId,
-            'quotation_id': quotationId,
-          },
-        );
-      }
+    const message =
+    'Your vehicle service record has been created and is now available in Service Records.';
 
-      await loadData();
+    await supabase
+        .from('notifications')
+        .insert({
+    'customer_id':
+    recordCustomerId,
+    'vehicle_id':
+    recordVehicleId,
+    'booking_id':
+    recordBookingId,
+    'quotation_id':
+    recordQuotationId,
+    'title': title,
+    'message': message,
+    'notification_type':
+    'service',
+    'target_page':
+    'service_records',
+    'is_read': false,
+    });
 
-      showMessage(
-        'Service record created successfully.',
-      );
+    await sendRecordNotification(
+    customerId:
+    recordCustomerId,
+    title: title,
+    message: message,
+    data: {
+    'notification_type':
+    'service',
+    'target_page':
+    'service_records',
+    'record_id':
+    recordId,
+    'vehicle_id':
+    recordVehicleId,
+    if (recordBookingId != null)
+    'booking_id':
+    recordBookingId,
+    if (recordQuotationId != null)
+    'quotation_id':
+    recordQuotationId,
+    },
+    );
+    } catch (
+    notificationError,
+    stackTrace
+    ) {
+    debugPrint(
+    'Service record notification failed: '
+    '$notificationError',
+    );
+
+    debugPrint(
+    stackTrace.toString(),
+    );
+    }
+    }
+
+    await loadData(
+    showLoading: false,
+    );
+
+    showMessage(
+    'Service record created successfully.',
+    );
+    } on PostgrestException catch (error) {
+    showMessage(
+    error.message,
+    );
+
+    await loadData(
+    showLoading: false,
+    );
     } catch (error) {
-      showMessage(
-        'Failed to create record: $error',
-      );
+    showMessage(
+    'Failed to create record: $error',
+    );
     } finally {
-      if (mounted) {
-        setState(() {
-          isSavingRecord = false;
-        });
-      }
+    if (mounted) {
+    setState(() {
+    isSavingRecord = false;
+    });
+    }
     }
   }
 
