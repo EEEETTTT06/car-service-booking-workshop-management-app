@@ -14,6 +14,7 @@ class AdminRecordsPage extends StatefulWidget {
 
 class _AdminRecordsPageState extends State<AdminRecordsPage> {
   bool isLoading = false;
+  bool isSavingRecord = false;
   final ScrollController scrollController = ScrollController();
   bool showBackToTop = false;
 
@@ -31,10 +32,16 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     loadData();
 
     scrollController.addListener(() {
-      if (scrollController.offset > 350 && !showBackToTop) {
-        setState(() => showBackToTop = true);
-      } else if (scrollController.offset <= 350 && showBackToTop) {
-        setState(() => showBackToTop = false);
+      if (!mounted) return;
+
+      final shouldShow =
+          scrollController.hasClients &&
+              scrollController.offset > 350;
+
+      if (shouldShow != showBackToTop) {
+        setState(() {
+          showBackToTop = shouldShow;
+        });
       }
     });
   }
@@ -47,6 +54,8 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
   }
 
   void scrollToTop() {
+    if (!scrollController.hasClients) return;
+
     scrollController.animateTo(
       0,
       duration: const Duration(milliseconds: 450),
@@ -183,6 +192,52 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     return response != null;
   }
 
+  Future<void> sendRecordNotification({
+    required String customerId,
+    required String title,
+    required String message,
+  }) async {
+    try {
+      final customer = await supabase
+          .from('customers')
+          .select('fcm_token, notification_enabled')
+          .eq(
+        'customer_id',
+        customerId,
+      )
+          .maybeSingle();
+
+      if (customer == null) return;
+
+      if (customer['notification_enabled'] == false) {
+        return;
+      }
+
+      final token =
+      customer['fcm_token']?.toString();
+
+      if (token == null || token.isEmpty) {
+        debugPrint(
+          'No FCM token found for customer $customerId',
+        );
+        return;
+      }
+
+      await supabase.functions.invoke(
+        'send-fcm',
+        body: {
+          'token': token,
+          'title': title,
+          'body': message,
+        },
+      );
+    } catch (error) {
+      debugPrint(
+        'Failed to send service record notification: $error',
+      );
+    }
+  }
+
   Future<void> createRecord({
     required Map<String, dynamic> vehicle,
     required String problem,
@@ -192,107 +247,165 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     String? bookingId,
     String? pendingId,
   }) async {
-    try {
-      final total = calculateTotal(items);
+    if (isSavingRecord) return;
 
-      if (quotationId != null && quotationId.isNotEmpty) {
-        final exists = await quotationRecordExists(quotationId);
+    final vehicleId = vehicle['vehicle_id'];
+    final customerId = vehicle['customer_id'];
+
+    if (vehicleId == null) {
+      showMessage(
+        'Vehicle information is missing.',
+      );
+      return;
+    }
+
+    if (items.isEmpty) {
+      showMessage(
+        'Please add at least one service item.',
+      );
+      return;
+    }
+
+    setState(() {
+      isSavingRecord = true;
+    });
+
+    try {
+      if (quotationId != null &&
+          quotationId.isNotEmpty) {
+        final exists =
+        await quotationRecordExists(
+          quotationId,
+        );
+
         if (exists) {
-          showMessage('This quotation already has a service record.');
+          showMessage(
+            'This quotation already has a service record.',
+          );
           return;
         }
       }
 
-      final record = await supabase.from('service_records').insert({
-        'vehicle_id': vehicle['vehicle_id'],
-        'customer_id': vehicle['customer_id'],
-        'quotation_id': quotationId,
-        'booking_id': bookingId,
-        'problem_description': problem,
-        'service_action': action,
+      final total = calculateTotal(items);
+
+      final record = await supabase
+          .from('service_records')
+          .insert({
+        'vehicle_id': vehicleId,
+        'customer_id': customerId,
+        'quotation_id':
+        quotationId?.isEmpty == true
+            ? null
+            : quotationId,
+        'booking_id':
+        bookingId?.isEmpty == true
+            ? null
+            : bookingId,
+        'problem_description':
+        problem.trim().isEmpty
+            ? 'No description'
+            : problem.trim(),
+        'service_action':
+        action.trim().isEmpty
+            ? 'Service completed.'
+            : action.trim(),
         'total_price': total,
         'status': 'Completed',
-      }).select().single();
+      })
+          .select()
+          .single();
 
       for (final item in items) {
-        await supabase.from('service_record_items').insert({
+        await supabase
+            .from('service_record_items')
+            .insert({
           'record_id': record['record_id'],
           'item_name': item['item_name'],
-          'quantity': item['quantity'],
-          'price': item['price'],
+          'quantity':
+          int.tryParse(
+            item['quantity'].toString(),
+          ) ??
+              1,
+          'price':
+          double.tryParse(
+            item['price'].toString(),
+          ) ??
+              0,
         });
       }
 
-      if (pendingId != null && pendingId.isNotEmpty) {
-        await supabase.from('pending_services').delete().eq(
+      if (bookingId != null &&
+          bookingId.isNotEmpty) {
+        await supabase.from('bookings').update({
+          'status': 'Completed',
+        }).eq(
+          'booking_id',
+          bookingId,
+        ).neq(
+          'status',
+          'Cancelled',
+        );
+      }
+
+      if (pendingId != null &&
+          pendingId.isNotEmpty) {
+        await supabase
+            .from('pending_services')
+            .delete()
+            .eq(
           'pending_id',
           pendingId,
         );
       }
 
-      if (vehicle['customer_id'] != null) {
+      if (customerId != null) {
+        const title = 'Service Record Created';
+
+        const message =
+            'Your vehicle service record has been created and is now available in Service Records.';
+
         await supabase.from('notifications').insert({
-          'customer_id': vehicle['customer_id'],
-          'vehicle_id': vehicle['vehicle_id'],
-          'booking_id': bookingId,
-          'quotation_id': quotationId,
-          'title': 'Service Record Created',
-          'message':
-          'Your vehicle service record has been created and is now available in Service Records.',
+          'customer_id': customerId,
+          'vehicle_id': vehicleId,
+          'booking_id':
+          bookingId?.isEmpty == true
+              ? null
+              : bookingId,
+          'quotation_id':
+          quotationId?.isEmpty == true
+              ? null
+              : quotationId,
+          'title': title,
+          'message': message,
+          'notification_type': 'service',
           'is_read': false,
         });
+
+        await sendRecordNotification(
+          customerId: customerId.toString(),
+          title: title,
+          message: message,
+        );
       }
 
       await loadData();
-      showMessage('Service record created successfully.');
-    } catch (error) {
-      showMessage('Failed to create record: $error');
-    }
-  }
 
-  Future<void> createRecordFromPendingService(
-      Map<String, dynamic> pendingService,
-      ) async {
-    try {
-      final quotation = pendingService['quotations'];
-      final quotationItems =
-          quotation?['quotation_items'] as List? ?? [];
-
-      if (quotationItems.isEmpty) {
-        showMessage(
-          'No quotation items found. Please create a manual service record instead.',
-        );
-        return;
-      }
-
-      final items = quotationItems.map<Map<String, dynamic>>((item) {
-        return {
-          'item_name': item['item_name'],
-          'quantity': int.tryParse(item['quantity'].toString()) ?? 1,
-          'price': double.tryParse(item['price'].toString()) ?? 0,
-        };
-      }).toList();
-
-      final vehicle = {
-        'vehicle_id': pendingService['vehicle_id'],
-        'customer_id': pendingService['customer_id'],
-      };
-
-      await createRecord(
-        vehicle: vehicle,
-        quotationId: pendingService['quotation_id'],
-        bookingId: pendingService['booking_id'],
-        pendingId: pendingService['pending_id'],
-        problem: quotation?['problem_description'] ??
-            pendingService['note'] ??
-            'No description',
-        action: 'Service completed from pending service workflow.',
-        items: items,
+      showMessage(
+        'Service record created successfully.',
       );
     } catch (error) {
-      showMessage('Failed to create record from completed pending service: $error');
+      showMessage(
+        'Failed to create record: $error',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isSavingRecord = false;
+        });
+      }
     }
   }
+
 
   void showMessage(String message) {
     if (!mounted) return;
@@ -508,6 +621,976 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     );
   }
 
+  Future<void> showManualRecordDialog({
+    Map<String, dynamic>? pendingService,
+  }) async {
+    final pendingVehicle =
+        pendingService?['vehicles'] ?? <String, dynamic>{};
+
+    final pendingCustomer =
+        pendingService?['customers'] ?? <String, dynamic>{};
+
+    final quotation = pendingService?['quotations'];
+
+    final quotationItems =
+        quotation?['quotation_items'] as List? ?? [];
+
+    Map<String, dynamic>? selectedVehicle =
+    pendingService == null
+        ? null
+        : {
+      'vehicle_id': pendingService['vehicle_id'],
+      'customer_id': pendingService['customer_id'],
+      'plate_number': pendingVehicle['plate_number'],
+      'car_model': pendingVehicle['car_model'],
+      'customers': pendingCustomer,
+    };
+
+    final vehicleSearchController =
+    TextEditingController();
+
+    final problemController =
+    TextEditingController(
+      text: pendingService == null
+          ? ''
+          : quotation?['problem_description']
+          ?.toString() ??
+          pendingService['note']?.toString() ??
+          '',
+    );
+
+    final actionController =
+    TextEditingController(
+      text: pendingService == null
+          ? ''
+          : 'Service completed from pending service workflow.',
+    );
+
+    final itemNameController =
+    TextEditingController();
+
+    final qtyController =
+    TextEditingController(text: '1');
+
+    final priceController =
+    TextEditingController();
+
+    final List<Map<String, dynamic>> tempItems =
+    quotationItems.map<Map<String, dynamic>>(
+          (item) {
+        return {
+          'item_name':
+          item['item_name']?.toString() ??
+              'Service Item',
+          'quantity':
+          int.tryParse(
+            item['quantity'].toString(),
+          ) ??
+              1,
+          'price':
+          double.tryParse(
+            item['price'].toString(),
+          ) ??
+              0,
+        };
+      },
+    ).toList();
+
+    Widget sectionTitle(
+        String title,
+        IconData icon,
+        ) {
+      return Row(
+        children: [
+          Icon(
+            icon,
+            color: const Color(0xFF339BFF),
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: Color(0xFF1F2937),
+            ),
+          ),
+        ],
+      );
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (
+              context,
+              setDialogState,
+              ) {
+            final search =
+            vehicleSearchController.text
+                .trim()
+                .toLowerCase();
+
+            final searchedVehicles =
+            vehicles.where((vehicle) {
+              final plate =
+              (vehicle['plate_number'] ?? '')
+                  .toString()
+                  .toLowerCase();
+
+              final model =
+              (vehicle['car_model'] ?? '')
+                  .toString()
+                  .toLowerCase();
+
+              final customerName =
+              (vehicle['customers']?['name'] ?? '')
+                  .toString()
+                  .toLowerCase();
+
+              return plate.contains(search) ||
+                  model.contains(search) ||
+                  customerName.contains(search);
+            }).toList();
+
+            final total =
+            calculateTotal(tempItems);
+
+            return Dialog(
+              insetPadding:
+              const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 24,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                BorderRadius.circular(28),
+              ),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding:
+                  const EdgeInsets.all(22),
+                  child: Column(
+                    mainAxisSize:
+                    MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding:
+                        const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          gradient:
+                          const LinearGradient(
+                            colors: [
+                              Color(0xFF339BFF),
+                              Color(0xFF63B3FF),
+                            ],
+                          ),
+                          borderRadius:
+                          BorderRadius.circular(24),
+                        ),
+                        child: Column(
+                          children: [
+                            const Icon(
+                              Icons.assignment,
+                              color: Colors.white,
+                              size: 42,
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              pendingService == null
+                                  ? 'Manual Service Record'
+                                  : 'Completed Service Record',
+                              style:
+                              const TextStyle(
+                                color: Colors.white,
+                                fontSize: 21,
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              pendingService == null
+                                  ? 'Create a completed service report manually.'
+                                  : 'Complete the service record for this pending service.',
+                              textAlign:
+                              TextAlign.center,
+                              style:
+                              const TextStyle(
+                                color:
+                                Colors.white70,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 22),
+
+                      sectionTitle(
+                        'Vehicle Information',
+                        Icons.directions_car,
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      if (pendingService != null)
+                        Container(
+                          width: double.infinity,
+                          padding:
+                          const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color:
+                            const Color(0xFFEAF4FF),
+                            borderRadius:
+                            BorderRadius.circular(18),
+                            border: Border.all(
+                              color: const Color(
+                                0xFF339BFF,
+                              ).withOpacity(0.18),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Completed Pending Service',
+                                style: TextStyle(
+                                  color:
+                                  Color(0xFF339BFF),
+                                  fontWeight:
+                                  FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '${selectedVehicle?['plate_number'] ?? 'Not Provided'} - '
+                                    '${selectedVehicle?['car_model'] ?? 'Not Provided'}',
+                                style:
+                                const TextStyle(
+                                  fontWeight:
+                                  FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Customer: ${displayCustomer(
+                                  selectedVehicle?['customers']
+                                  ?['name'],
+                                )}',
+                                style:
+                                const TextStyle(
+                                  color:
+                                  Colors.black54,
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              Text(
+                                'Service Type: ${pendingService['service_type'] ?? 'Service'}',
+                                style:
+                                const TextStyle(
+                                  color:
+                                  Colors.black54,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'This vehicle is linked to the selected completed pending service.',
+                                style: TextStyle(
+                                  color:
+                                  Colors.black54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else ...[
+                        TextField(
+                          controller:
+                          vehicleSearchController,
+                          onChanged: (_) {
+                            setDialogState(() {});
+                          },
+                          decoration:
+                          InputDecoration(
+                            hintText:
+                            'Search plate, model or customer',
+                            prefixIcon:
+                            const Icon(
+                              Icons.search,
+                              color:
+                              Color(0xFF339BFF),
+                            ),
+                            suffixIcon:
+                            vehicleSearchController
+                                .text
+                                .isNotEmpty
+                                ? IconButton(
+                              onPressed: () {
+                                vehicleSearchController
+                                    .clear();
+
+                                setDialogState(
+                                      () {},
+                                );
+                              },
+                              icon:
+                              const Icon(
+                                Icons.clear,
+                              ),
+                            )
+                                : null,
+                            filled: true,
+                            fillColor:
+                            const Color(
+                              0xFFF5F7FA,
+                            ),
+                            border:
+                            OutlineInputBorder(
+                              borderRadius:
+                              BorderRadius.circular(
+                                18,
+                              ),
+                              borderSide:
+                              BorderSide.none,
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        if (selectedVehicle != null)
+                          Container(
+                            width: double.infinity,
+                            padding:
+                            const EdgeInsets.all(
+                              14,
+                            ),
+                            decoration:
+                            BoxDecoration(
+                              color: const Color(
+                                0xFFEAF4FF,
+                              ),
+                              borderRadius:
+                              BorderRadius.circular(
+                                18,
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment:
+                              CrossAxisAlignment
+                                  .start,
+                              children: [
+                                Text(
+                                  '${selectedVehicle!['plate_number'] ?? 'Not Provided'} - '
+                                      '${selectedVehicle!['car_model'] ?? 'Not Provided'}',
+                                  style:
+                                  const TextStyle(
+                                    fontWeight:
+                                    FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(
+                                  height: 6,
+                                ),
+                                Text(
+                                  'Customer: ${displayCustomer(
+                                    selectedVehicle![
+                                    'customers']
+                                    ?['name'],
+                                  )}',
+                                  style:
+                                  const TextStyle(
+                                    color:
+                                    Colors.black54,
+                                  ),
+                                ),
+                                const SizedBox(
+                                  height: 6,
+                                ),
+                                Align(
+                                  alignment:
+                                  Alignment
+                                      .centerRight,
+                                  child:
+                                  TextButton.icon(
+                                    onPressed: () {
+                                      setDialogState(
+                                            () {
+                                          selectedVehicle =
+                                          null;
+
+                                          vehicleSearchController
+                                              .clear();
+                                        },
+                                      );
+                                    },
+                                    icon:
+                                    const Icon(
+                                      Icons
+                                          .change_circle_outlined,
+                                    ),
+                                    label:
+                                    const Text(
+                                      'Change Vehicle',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          SizedBox(
+                            height: 160,
+                            child:
+                            searchedVehicles
+                                .isEmpty
+                                ? const Center(
+                              child: Text(
+                                'No vehicle found.',
+                                style:
+                                TextStyle(
+                                  color: Colors
+                                      .black54,
+                                ),
+                              ),
+                            )
+                                : ListView.builder(
+                              itemCount:
+                              searchedVehicles
+                                  .length,
+                              itemBuilder:
+                                  (
+                                  context,
+                                  index,
+                                  ) {
+                                final vehicle =
+                                searchedVehicles[
+                                index];
+
+                                final customer =
+                                    vehicle['customers'] ??
+                                        {};
+
+                                return Card(
+                                  elevation:
+                                  0,
+                                  color:
+                                  const Color(
+                                    0xFFF5F7FA,
+                                  ),
+                                  shape:
+                                  RoundedRectangleBorder(
+                                    borderRadius:
+                                    BorderRadius.circular(
+                                      16,
+                                    ),
+                                  ),
+                                  child:
+                                  ListTile(
+                                    leading:
+                                    const CircleAvatar(
+                                      backgroundColor:
+                                      Color(
+                                        0xFFD7E5FA,
+                                      ),
+                                      child:
+                                      Icon(
+                                        Icons
+                                            .directions_car,
+                                        color:
+                                        Color(
+                                          0xFF339BFF,
+                                        ),
+                                      ),
+                                    ),
+                                    title:
+                                    Text(
+                                      '${vehicle['plate_number'] ?? ''} - '
+                                          '${vehicle['car_model'] ?? ''}',
+                                      style:
+                                      const TextStyle(
+                                        fontWeight:
+                                        FontWeight.bold,
+                                      ),
+                                    ),
+                                    subtitle:
+                                    Text(
+                                      'Customer: ${displayCustomer(
+                                        customer[
+                                        'name'],
+                                      )}',
+                                    ),
+                                    trailing:
+                                    const Text(
+                                      'SELECT',
+                                      style:
+                                      TextStyle(
+                                        color:
+                                        Color(
+                                          0xFF339BFF,
+                                        ),
+                                        fontWeight:
+                                        FontWeight.bold,
+                                        fontSize:
+                                        10,
+                                      ),
+                                    ),
+                                    onTap:
+                                        () {
+                                      setDialogState(
+                                            () {
+                                          selectedVehicle =
+                                              vehicle;
+                                        },
+                                      );
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                      ],
+
+                      const SizedBox(height: 22),
+
+                      sectionTitle(
+                        'Service Details',
+                        Icons.build_circle,
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      buildInputBox(
+                        controller:
+                        problemController,
+                        hint:
+                        'Problem description',
+                        icon: Icons
+                            .report_problem_outlined,
+                        maxLines: 2,
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      buildInputBox(
+                        controller:
+                        actionController,
+                        hint:
+                        'Service action / repair notes',
+                        icon: Icons
+                            .build_circle_outlined,
+                        maxLines: 2,
+                      ),
+
+                      const SizedBox(height: 22),
+
+                      sectionTitle(
+                        'Parts / Labour',
+                        Icons.handyman,
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      buildInputBox(
+                        controller:
+                        itemNameController,
+                        hint:
+                        'Part / labour name',
+                        icon: Icons.build,
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: buildInputBox(
+                              controller:
+                              qtyController,
+                              hint: 'Qty',
+                              icon:
+                              Icons.numbers,
+                              keyboardType:
+                              TextInputType
+                                  .number,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: buildInputBox(
+                              controller:
+                              priceController,
+                              hint: 'Unit price',
+                              icon: Icons
+                                  .payments_outlined,
+                              keyboardType:
+                              const TextInputType
+                                  .numberWithOptions(
+                                decimal: true,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      SizedBox(
+                        width: double.infinity,
+                        child:
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            final itemName =
+                            itemNameController
+                                .text
+                                .trim();
+
+                            final quantity =
+                            int.tryParse(
+                              qtyController.text
+                                  .trim(),
+                            );
+
+                            final price =
+                            double.tryParse(
+                              priceController.text
+                                  .trim(),
+                            );
+
+                            if (itemName.isEmpty ||
+                                quantity == null ||
+                                price == null) {
+                              showMessage(
+                                'Please complete item information correctly.',
+                              );
+                              return;
+                            }
+
+                            if (quantity <= 0) {
+                              showMessage(
+                                'Quantity must be more than 0.',
+                              );
+                              return;
+                            }
+
+                            if (price < 0) {
+                              showMessage(
+                                'Price cannot be negative.',
+                              );
+                              return;
+                            }
+
+                            setDialogState(() {
+                              tempItems.add({
+                                'item_name':
+                                itemName,
+                                'quantity':
+                                quantity,
+                                'price': price,
+                              });
+
+                              itemNameController
+                                  .clear();
+
+                              qtyController.text =
+                              '1';
+
+                              priceController
+                                  .clear();
+                            });
+                          },
+                          icon:
+                          const Icon(Icons.add),
+                          label:
+                          const Text('Add Item'),
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      if (tempItems.isEmpty)
+                        Container(
+                          width: double.infinity,
+                          padding:
+                          const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color:
+                            const Color(0xFFF5F7FA),
+                            borderRadius:
+                            BorderRadius.circular(18),
+                          ),
+                          child: const Text(
+                            'No service items added.',
+                            textAlign:
+                            TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.black54,
+                            ),
+                          ),
+                        )
+                      else
+                        ...tempItems.asMap().entries.map(
+                              (entry) {
+                            final index =
+                                entry.key;
+
+                            final item =
+                                entry.value;
+
+                            final quantity =
+                                int.tryParse(
+                                  item['quantity']
+                                      .toString(),
+                                ) ??
+                                    1;
+
+                            final price =
+                                double.tryParse(
+                                  item['price']
+                                      .toString(),
+                                ) ??
+                                    0;
+
+                            final subtotal =
+                                quantity * price;
+
+                            return Card(
+                              elevation: 0,
+                              color:
+                              const Color(
+                                0xFFF5F7FA,
+                              ),
+                              shape:
+                              RoundedRectangleBorder(
+                                borderRadius:
+                                BorderRadius.circular(
+                                  16,
+                                ),
+                              ),
+                              child: ListTile(
+                                leading:
+                                const Icon(
+                                  Icons
+                                      .check_circle,
+                                  color:
+                                  Colors.green,
+                                ),
+                                title: Text(
+                                  item['item_name']
+                                      ?.toString() ??
+                                      'Service Item',
+                                  style:
+                                  const TextStyle(
+                                    fontWeight:
+                                    FontWeight.bold,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  'Qty: $quantity × RM ${price.toStringAsFixed(2)}',
+                                ),
+                                trailing: Row(
+                                  mainAxisSize:
+                                  MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'RM ${subtotal.toStringAsFixed(2)}',
+                                      style:
+                                      const TextStyle(
+                                        color: Color(
+                                          0xFF339BFF,
+                                        ),
+                                        fontWeight:
+                                        FontWeight.bold,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon:
+                                      const Icon(
+                                        Icons.delete,
+                                        color:
+                                        Colors.red,
+                                      ),
+                                      onPressed: () {
+                                        setDialogState(
+                                              () {
+                                            tempItems
+                                                .removeAt(
+                                              index,
+                                            );
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                      const SizedBox(height: 18),
+
+                      Container(
+                        width: double.infinity,
+                        padding:
+                        const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color:
+                          const Color(0xFFEAF4FF),
+                          borderRadius:
+                          BorderRadius.circular(18),
+                        ),
+                        child: Row(
+                          children: [
+                            const Text(
+                              'Total Amount',
+                              style: TextStyle(
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              'RM ${total.toStringAsFixed(2)}',
+                              style:
+                              const TextStyle(
+                                color:
+                                Color(0xFF339BFF),
+                                fontWeight:
+                                FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child:
+                            OutlinedButton(
+                              onPressed: () {
+                                Navigator.pop(
+                                  dialogContext,
+                                );
+                              },
+                              child:
+                              const Text(
+                                'Cancel',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child:
+                            ElevatedButton.icon(
+                              style:
+                              ElevatedButton
+                                  .styleFrom(
+                                backgroundColor:
+                                const Color(
+                                  0xFF339BFF,
+                                ),
+                                foregroundColor:
+                                Colors.white,
+                              ),
+                              onPressed: () async {
+                                if (selectedVehicle ==
+                                    null) {
+                                  showMessage(
+                                    'Please select a vehicle.',
+                                  );
+                                  return;
+                                }
+
+                                if (tempItems
+                                    .isEmpty) {
+                                  showMessage(
+                                    'Please add at least one service item.',
+                                  );
+                                  return;
+                                }
+
+                                if (isSavingRecord) {
+                                  return;
+                                }
+
+                                Navigator.pop(
+                                  dialogContext,
+                                );
+
+                                await createRecord(
+                                  vehicle:
+                                  selectedVehicle!,
+                                  problem:
+                                  problemController
+                                      .text
+                                      .trim(),
+                                  action:
+                                  actionController
+                                      .text
+                                      .trim(),
+                                  items: List<
+                                      Map<String,
+                                          dynamic>>.from(
+                                    tempItems,
+                                  ),
+                                  quotationId:
+                                  pendingService?[
+                                  'quotation_id']
+                                      ?.toString(),
+                                  bookingId:
+                                  pendingService?[
+                                  'booking_id']
+                                      ?.toString(),
+                                  pendingId:
+                                  pendingService?[
+                                  'pending_id']
+                                      ?.toString(),
+                                );
+                              },
+                              icon:
+                              const Icon(
+                                Icons.save,
+                              ),
+                              label:
+                              const Text(
+                                'Save Record',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    vehicleSearchController.dispose();
+    problemController.dispose();
+    actionController.dispose();
+    itemNameController.dispose();
+    qtyController.dispose();
+    priceController.dispose();
+  }
+
   void showAddRecordSourceDialog() {
     showModalBottomSheet(
       context: context,
@@ -578,350 +1661,95 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     );
   }
 
-  void showManualRecordDialog() {
-    Map<String, dynamic>? selectedVehicle;
+  Future<void> createRecordFromPendingService(
+      Map<String, dynamic> pendingService,
+      ) async {
+    try {
+      final status =
+      pendingService['status']?.toString();
 
-    final vehicleSearchController = TextEditingController();
-    final problemController = TextEditingController();
-    final actionController = TextEditingController();
+      if (status != 'Completed') {
+        showMessage(
+          'Only a completed pending service can create a service record.',
+        );
+        return;
+      }
 
-    final itemNameController = TextEditingController();
-    final qtyController = TextEditingController(text: '1');
-    final priceController = TextEditingController();
+      final quotation =
+      pendingService['quotations'];
 
-    final List<Map<String, dynamic>> tempItems = [];
+      final quotationId =
+      pendingService['quotation_id']?.toString();
 
-    Widget sectionTitle(String title, IconData icon) {
-      return Row(
-        children: [
-          Icon(icon, color: const Color(0xFF339BFF), size: 20),
-          const SizedBox(width: 8),
-          Text(
-            title,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Color(0xFF1F2937),
-            ),
-          ),
-        ],
+      final quotationItems =
+          quotation?['quotation_items'] as List? ?? [];
+
+      // Online customer / confirmed quotation:
+      // Directly create the service record using quotation items.
+      if (quotationId != null &&
+          quotationId.isNotEmpty &&
+          quotationItems.isNotEmpty) {
+        final items =
+        quotationItems.map<Map<String, dynamic>>(
+              (item) {
+            return {
+              'item_name':
+              item['item_name']?.toString() ??
+                  'Service Item',
+              'quantity':
+              int.tryParse(
+                item['quantity'].toString(),
+              ) ??
+                  1,
+              'price':
+              double.tryParse(
+                item['price'].toString(),
+              ) ??
+                  0,
+            };
+          },
+        ).toList();
+
+        final vehicle = {
+          'vehicle_id':
+          pendingService['vehicle_id'],
+          'customer_id':
+          pendingService['customer_id'],
+        };
+
+        await createRecord(
+          vehicle: vehicle,
+          quotationId: quotationId,
+          bookingId:
+          pendingService['booking_id']
+              ?.toString(),
+          pendingId:
+          pendingService['pending_id']
+              ?.toString(),
+          problem:
+          quotation?['problem_description']
+              ?.toString() ??
+              pendingService['note']
+                  ?.toString() ??
+              'No description',
+          action:
+          'Service completed according to the confirmed quotation.',
+          items: items,
+        );
+
+        return;
+      }
+
+      // Walk-in / no quotation:
+      // Open manual form so Admin can enter the actual items and price.
+      showManualRecordDialog(
+        pendingService: pendingService,
+      );
+    } catch (error) {
+      showMessage(
+        'Failed to create record from completed pending service: $error',
       );
     }
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final search = vehicleSearchController.text.toLowerCase();
-
-            final searchedVehicles = vehicles.where((vehicle) {
-              final plate =
-              (vehicle['plate_number'] ?? '').toString().toLowerCase();
-              final model =
-              (vehicle['car_model'] ?? '').toString().toLowerCase();
-              final customer =
-              (vehicle['customers']?['name'] ?? '').toString().toLowerCase();
-
-              return plate.contains(search) ||
-                  model.contains(search) ||
-                  customer.contains(search);
-            }).toList();
-
-            final total = calculateTotal(tempItems);
-
-            return Dialog(
-              insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(28),
-              ),
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.all(22),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF339BFF), Color(0xFF63B3FF)],
-                          ),
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: const Column(
-                          children: [
-                            Icon(Icons.assignment, color: Colors.white, size: 42),
-                            SizedBox(height: 10),
-                            Text(
-                              'Manual Service Record',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 21,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            SizedBox(height: 6),
-                            Text(
-                              'Create a completed service report manually.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 22),
-
-                      sectionTitle('Vehicle Information', Icons.directions_car),
-                      const SizedBox(height: 12),
-
-                      buildInputBox(
-                        controller: vehicleSearchController,
-                        hint: 'Search plate, model or customer',
-                        icon: Icons.search,
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      if (selectedVehicle != null)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEAF4FF),
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: Text(
-                            '${selectedVehicle!['plate_number']} - ${selectedVehicle!['car_model']}\n'
-                                'Customer: ${displayCustomer(selectedVehicle!['customers']?['name'])}',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        )
-                      else
-                        SizedBox(
-                          height: 145,
-                          child: searchedVehicles.isEmpty
-                              ? const Center(child: Text('No vehicle found.'))
-                              : ListView.builder(
-                            itemCount: searchedVehicles.length,
-                            itemBuilder: (context, index) {
-                              final vehicle = searchedVehicles[index];
-
-                              return Card(
-                                child: ListTile(
-                                  title: Text(
-                                    '${vehicle['plate_number']} - ${vehicle['car_model']}',
-                                  ),
-                                  subtitle: Text(
-                                    'Customer: ${displayCustomer(vehicle['customers']?['name'])}',
-                                  ),
-                                  onTap: () {
-                                    setDialogState(() {
-                                      selectedVehicle = vehicle;
-                                    });
-                                  },
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-
-                      const SizedBox(height: 22),
-
-                      sectionTitle('Service Details', Icons.build_circle),
-                      const SizedBox(height: 12),
-
-                      buildInputBox(
-                        controller: problemController,
-                        hint: 'Problem description',
-                        icon: Icons.report_problem_outlined,
-                        maxLines: 2,
-                      ),
-                      const SizedBox(height: 12),
-                      buildInputBox(
-                        controller: actionController,
-                        hint: 'Service action / repair notes',
-                        icon: Icons.build_circle_outlined,
-                        maxLines: 2,
-                      ),
-
-                      const SizedBox(height: 22),
-
-                      sectionTitle('Parts / Labour', Icons.handyman),
-                      const SizedBox(height: 12),
-
-                      buildInputBox(
-                        controller: itemNameController,
-                        hint: 'Part / labour name',
-                        icon: Icons.build,
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: buildInputBox(
-                              controller: qtyController,
-                              hint: 'Qty',
-                              icon: Icons.numbers,
-                              keyboardType: TextInputType.number,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: buildInputBox(
-                              controller: priceController,
-                              hint: 'Unit price',
-                              icon: Icons.payments_outlined,
-                              keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            if (itemNameController.text.trim().isEmpty ||
-                                qtyController.text.trim().isEmpty ||
-                                priceController.text.trim().isEmpty) {
-                              showMessage('Please complete item information.');
-                              return;
-                            }
-
-                            setDialogState(() {
-                              tempItems.add({
-                                'item_name': itemNameController.text.trim(),
-                                'quantity':
-                                int.tryParse(qtyController.text.trim()) ?? 1,
-                                'price':
-                                double.tryParse(priceController.text.trim()) ??
-                                    0,
-                              });
-
-                              itemNameController.clear();
-                              qtyController.text = '1';
-                              priceController.clear();
-                            });
-                          },
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add Item'),
-                        ),
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      ...tempItems.asMap().entries.map((entry) {
-                        final index = entry.key;
-                        final item = entry.value;
-                        final price =
-                            double.tryParse(item['price'].toString()) ?? 0;
-
-                        return Card(
-                          child: ListTile(
-                            leading: const Icon(
-                              Icons.check_circle,
-                              color: Colors.green,
-                            ),
-                            title: Text(item['item_name']),
-                            subtitle: Text(
-                              'Qty: ${item['quantity']} × RM ${price.toStringAsFixed(2)}',
-                            ),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                              onPressed: () {
-                                setDialogState(() {
-                                  tempItems.removeAt(index);
-                                });
-                              },
-                            ),
-                          ),
-                        );
-                      }),
-
-                      const SizedBox(height: 18),
-
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF5F7FA),
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Row(
-                          children: [
-                            const Text(
-                              'Total Amount',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            const Spacer(),
-                            Text(
-                              'RM ${total.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                color: Color(0xFF339BFF),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('Cancel'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF339BFF),
-                                foregroundColor: Colors.white,
-                              ),
-                              onPressed: () async {
-                                if (selectedVehicle == null ||
-                                    tempItems.isEmpty) {
-                                  showMessage(
-                                    'Please select vehicle and add at least one item.',
-                                  );
-                                  return;
-                                }
-
-                                Navigator.pop(context);
-
-                                await createRecord(
-                                  vehicle: selectedVehicle!,
-                                  problem: problemController.text.trim(),
-                                  action: actionController.text.trim(),
-                                  items: tempItems,
-                                );
-                              },
-                              child: const Text('Save Record'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
   }
 
   void showCompletedPendingServiceDialog() {
@@ -1385,23 +2213,27 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
         backgroundColor: const Color(0xFF339BFF),
         foregroundColor: Colors.white,
         elevation: 0,
-
         leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            AdminSidebar.show(context);
+            Navigator.pop(context);
           },
-          icon: const CircleAvatar(
-            backgroundColor: Colors.white,
-            child: Icon(
-              Icons.person,
-              color: Color(0xFF339BFF),
-            ),
-          ),
         ),
-
-        actions: const [
-          NotificationBell(
+        actions: [
+          const NotificationBell(
             isAdmin: true,
+          ),
+          IconButton(
+            onPressed: () {
+              AdminSidebar.show(context);
+            },
+            icon: const CircleAvatar(
+              backgroundColor: Colors.white,
+              child: Icon(
+                Icons.person,
+                color: Color(0xFF339BFF),
+              ),
+            ),
           ),
         ],
       ),
@@ -1461,6 +2293,15 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
                       decoration: InputDecoration(
                         hintText: 'Search by plate number',
                         prefixIcon: const Icon(Icons.search),
+                        suffixIcon: searchController.text.isNotEmpty
+                            ? IconButton(
+                          onPressed: () {
+                            searchController.clear();
+                            setState(() {});
+                          },
+                          icon: const Icon(Icons.clear),
+                        )
+                            : null,
                         filled: true,
                         fillColor: Colors.white,
                         border: OutlineInputBorder(
