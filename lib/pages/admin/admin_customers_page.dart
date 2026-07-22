@@ -194,17 +194,65 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
     required String email,
     required String phone,
   }) async {
+    final normalizedName = name.trim();
+    final normalizedEmail =
+    email.trim().toLowerCase();
+    final normalizedPhone = phone.trim();
+
+    if (normalizedName.isEmpty ||
+        normalizedEmail.isEmpty ||
+        normalizedPhone.isEmpty) {
+      showMessage(
+        'Please fill in customer name, email and phone number.',
+      );
+      return;
+    }
+
     try {
-      await supabase.from('customers').insert({
-        'name': name,
-        'email': email,
-        'phone': phone,
-      });
+      final rpcResult = await supabase.rpc(
+        'admin_create_customer',
+        params: {
+          'p_name': normalizedName,
+          'p_email': normalizedEmail,
+          'p_phone': normalizedPhone,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid customer information was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['created'] != true ||
+          result['customer_id'] == null) {
+        throw Exception(
+          'The customer was not created correctly.',
+        );
+      }
 
       await fetchCustomers();
-      showMessage('Customer added successfully.');
-    } catch (error) {
-      showMessage('Failed to add customer: $error');
+
+      showMessage(
+        'Customer added successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await fetchCustomers();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin add customer failed: $error',
+      );
+      debugPrint(stackTrace.toString());
+
+      showMessage(
+        'Failed to add customer: $error',
+      );
     }
   }
 
@@ -214,38 +262,146 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
     required String email,
     required String phone,
   }) async {
-    try {
-      await supabase.from('customers').update({
-        'name': name,
-        'email': email,
-        'phone': phone,
-      }).eq('customer_id', customerId);
+    final normalizedCustomerId =
+    customerId.trim();
 
-      await supabase.from('vehicles').update({
-        'customer_name': name.toUpperCase(),
-      }).eq('customer_id', customerId);
+    final normalizedName = name.trim();
+    final normalizedEmail =
+    email.trim().toLowerCase();
+    final normalizedPhone = phone.trim();
+
+    if (normalizedCustomerId.isEmpty) {
+      showMessage(
+        'Customer information is missing.',
+      );
+      return;
+    }
+
+    if (normalizedName.isEmpty ||
+        normalizedEmail.isEmpty ||
+        normalizedPhone.isEmpty) {
+      showMessage(
+        'Please fill in customer name, email and phone number.',
+      );
+      return;
+    }
+
+    try {
+      final rpcResult = await supabase.rpc(
+        'admin_update_customer',
+        params: {
+          'p_customer_id':
+          normalizedCustomerId,
+          'p_name': normalizedName,
+          'p_email': normalizedEmail,
+          'p_phone': normalizedPhone,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid customer information was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['updated'] != true ||
+          result['customer_id'] == null) {
+        throw Exception(
+          'The customer was not updated correctly.',
+        );
+      }
 
       await fetchCustomers();
-      showMessage('Customer information updated successfully.');
-    } catch (error) {
-      showMessage('Failed to update customer: $error');
+
+      showMessage(
+        'Customer information updated successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await fetchCustomers();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin update customer failed: $error',
+      );
+      debugPrint(stackTrace.toString());
+
+      showMessage(
+        'Failed to update customer: $error',
+      );
     }
   }
 
-  Future<void> deleteCustomer(String customerId) async {
-    try {
-      await supabase.from('vehicles').update({
-        'customer_id': null,
-        'customer_name': null,
-        'verification_status': 'Pending Claim',
-      }).eq('customer_id', customerId);
+  Future<void> deleteCustomer(
+      String customerId,
+      ) async {
+    final normalizedCustomerId =
+    customerId.trim();
 
-      await supabase.from('customers').delete().eq('customer_id', customerId);
+    if (normalizedCustomerId.isEmpty) {
+      showMessage(
+        'Customer information is missing.',
+      );
+      return;
+    }
+
+    try {
+      final rpcResult = await supabase.rpc(
+        'admin_delete_customer',
+        params: {
+          'p_customer_id':
+          normalizedCustomerId,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid customer deletion result was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['deleted'] != true) {
+        throw Exception(
+          'The customer was not deleted.',
+        );
+      }
+
+      final unclaimedCount =
+          int.tryParse(
+            result['unclaimed_vehicle_count']
+                ?.toString() ??
+                '0',
+          ) ??
+              0;
 
       await fetchCustomers();
-      showMessage('Customer deleted. Claimed vehicles changed to Pending Claim.');
-    } catch (error) {
-      showMessage('Failed to delete customer: $error');
+
+      showMessage(
+        unclaimedCount > 0
+            ? 'Customer deleted. $unclaimedCount vehicle(s) changed to Pending Claim.'
+            : 'Customer deleted successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await fetchCustomers();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin delete customer failed: $error',
+      );
+      debugPrint(stackTrace.toString());
+
+      showMessage(
+        'Failed to delete customer: $error',
+      );
     }
   }
 
@@ -279,31 +435,88 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
     required Map<String, dynamic> customer,
     required Map<String, dynamic> vehicle,
   }) async {
+    final customerId =
+    customer['customer_id']
+        ?.toString()
+        .trim();
+
+    final vehicleId =
+    vehicle['vehicle_id']
+        ?.toString()
+        .trim();
+
+    if (customerId == null ||
+        customerId.isEmpty ||
+        vehicleId == null ||
+        vehicleId.isEmpty) {
+      showMessage(
+        'Customer or vehicle information is missing.',
+      );
+      return;
+    }
+
     try {
-      await supabase.from('vehicles').update({
-        'customer_id': customer['customer_id'],
-        'customer_name': customer['name'].toString().toUpperCase(),
-        'verification_status': 'Verified',
-      }).eq('vehicle_id', vehicle['vehicle_id']);
+      final rpcResult = await supabase.rpc(
+        'admin_assign_pending_vehicle',
+        params: {
+          'p_customer_id': customerId,
+          'p_vehicle_id': vehicleId,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid vehicle assignment result was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['assigned'] != true) {
+        throw Exception(
+          'The vehicle was not assigned.',
+        );
+      }
 
       await fetchCustomers();
 
       if (!mounted) return;
-      Navigator.pop(context); // close add vehicle dialog
-      Navigator.pop(context); // close old customer detail dialog
+
+      Navigator.pop(context);
+      Navigator.pop(context);
 
       await fetchCustomers();
 
-      final updatedCustomer = customers.firstWhere(
-            (item) => item['customer_id'] == customer['customer_id'],
+      final updatedCustomer =
+      customers.firstWhere(
+            (item) =>
+        item['customer_id'] ==
+            customerId,
         orElse: () => customer,
       );
 
-      showCustomerDetails(updatedCustomer);
+      showCustomerDetails(
+        updatedCustomer,
+      );
 
-      showMessage('Vehicle assigned to customer successfully.');
-    } catch (error) {
-      showMessage('Failed to assign vehicle: $error');
+      showMessage(
+        'Vehicle assigned to customer successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await fetchCustomers();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Assign vehicle failed: $error',
+      );
+      debugPrint(stackTrace.toString());
+
+      showMessage(
+        'Failed to assign vehicle: $error',
+      );
     }
   }
 
@@ -668,9 +881,11 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
                             final email = emailController.text.trim();
                             final phone = phoneController.text.trim();
 
-                            if (name.isEmpty || phone.isEmpty) {
+                            if (name.isEmpty ||
+                                email.isEmpty ||
+                                phone.isEmpty) {
                               showMessage(
-                                'Please fill in customer name and phone number.',
+                                'Please fill in customer name, email and phone number.',
                               );
                               return;
                             }
@@ -755,8 +970,10 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
                 final email = emailController.text.trim();
                 final phone = phoneController.text.trim();
 
-                if (name.isEmpty || phone.isEmpty) {
-                  showMessage('Please fill in customer name and phone number.');
+                if (name.isEmpty ||
+                    email.isEmpty ||
+                    phone.isEmpty) {
+                  showMessage(  'Please fill in customer name, email and phone number.');
                   return;
                 }
 
@@ -827,8 +1044,10 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
                 ],
                 const SizedBox(height: 14),
                 const Text(
-                  'Service records will not be affected.',
-                  style: TextStyle(color: Colors.black54),
+                  'Deletion is only allowed when the customer has no booking, quotation, pending service or service record. Linked vehicles will be changed to Pending Claim.',
+                  style: TextStyle(
+                    color: Colors.black54,
+                  ),
                 ),
               ],
             ),

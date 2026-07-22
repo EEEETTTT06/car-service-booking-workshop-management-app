@@ -296,71 +296,154 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
   }) async {
     if (isUpdatingQuotation) return;
 
+    final quotationId =
+    quotation['quotation_id']
+        ?.toString()
+        .trim();
+
+    if (quotationId == null ||
+        quotationId.isEmpty) {
+      showMessage(
+        'Quotation information is missing.',
+      );
+      return;
+    }
+
+    if (status != 'Confirmed' &&
+        status != 'Cancelled') {
+      showMessage(
+        'The quotation decision is invalid.',
+      );
+      return;
+    }
+
+    if (!mounted) return;
+
     setState(() {
       isUpdatingQuotation = true;
     });
 
     try {
-      final updatedQuotation = await supabase
-          .from('quotations')
-          .update({
-        'status': status,
-        'updated_at': DateTime.now().toIso8601String(),
-      })
-          .eq(
-        'quotation_id',
-        quotation['quotation_id'],
-      )
-          .eq(
-        'status',
-        'Sent',
-      )
-          .select('quotation_id')
-          .maybeSingle();
-
-      if (updatedQuotation == null) {
-        await loadQuotations();
-
-        showMessage(
-          'This quotation has already been processed.',
-        );
-
-        return;
-      }
-
-      final vehicle = quotation['vehicles'] ?? {};
-      final plate =
-          vehicle['plate_number'] ?? 'your vehicle';
-
-      if (status == 'Cancelled') {
-        await supabase.from('pending_services').update({
-          'quotation_id': null,
-          'status': 'Waiting Fix',
-          'note':
-          'Customer rejected the quotation. Create a new quotation if needed.',
-          'updated_at': DateTime.now().toIso8601String(),
-        }).eq(
-          'quotation_id',
-          quotation['quotation_id'],
-        );
-
-        await supabase.from('notifications').insert({
-          'customer_id': quotation['customer_id'],
-          'vehicle_id': quotation['vehicle_id'],
-          'booking_id': quotation['booking_id'],
-          'quotation_id': quotation['quotation_id'],
-          'title': 'Quotation Rejected',
-          'message':
-          'You rejected the quotation for $plate. The workshop will not proceed with this quotation.',
-          'notification_type': 'quotation',
-          'is_read': false,
-        });
-      }
-
-      await notifyAdminsQuotationDecision(
-        quotation: quotation,
-        status: status,
+      /*
+     * The RPC validates the logged-in customer,
+     * quotation ownership and quotation status.
+     *
+     * Quotation and Pending Service changes are
+     * completed in one database transaction.
+     */
+      final rpcResult = await supabase.rpc(
+        'customer_decide_quotation',
+        params: {
+          'p_quotation_id': quotationId,
+          'p_decision': status,
+        },
       );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid quotation decision information was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      final returnedQuotationId =
+      result['quotation_id']
+          ?.toString();
+
+      final customerId =
+      result['customer_id']
+          ?.toString();
+
+      final vehicleId =
+      result['vehicle_id']
+          ?.toString();
+
+      final bookingId =
+      result['booking_id']
+          ?.toString();
+
+      final returnedStatus =
+      result['status']
+          ?.toString();
+
+      final plateValue =
+      result['plate_number']
+          ?.toString()
+          .trim();
+
+      final plate =
+      plateValue == null ||
+          plateValue.isEmpty
+          ? 'your vehicle'
+          : plateValue;
+
+      if (returnedQuotationId == null ||
+          returnedQuotationId.isEmpty) {
+        throw Exception(
+          'Quotation ID was not returned.',
+        );
+      }
+
+      if (returnedStatus != status) {
+        throw Exception(
+          'The quotation decision was not completed correctly.',
+        );
+      }
+
+      /*
+     * Notifications run after the transaction.
+     * Notification failure will not undo the
+     * customer's quotation decision.
+     */
+      try {
+        if (status == 'Cancelled' &&
+            customerId != null &&
+            customerId.isNotEmpty) {
+          await supabase
+              .from('notifications')
+              .insert({
+            'customer_id': customerId,
+            'vehicle_id': vehicleId,
+            'booking_id': bookingId,
+            'quotation_id':
+            returnedQuotationId,
+            'title':
+            'Quotation Rejected',
+            'message':
+            'You rejected the quotation for $plate. The workshop will not proceed with this quotation.',
+            'notification_type':
+            'quotation',
+            'target_page':
+            'customer_quotations',
+            'is_read': false,
+          });
+        }
+
+        /*
+       * Existing method creates Admin notification
+       * history and sends FCM to all Admin devices.
+       */
+        await notifyAdminsQuotationDecision(
+          quotation: quotation,
+          status: status,
+        );
+      } catch (
+      notificationError,
+      stackTrace
+      ) {
+        debugPrint(
+          'Quotation decision notification failed: '
+              '$notificationError',
+        );
+
+        debugPrint(
+          stackTrace.toString(),
+        );
+      }
 
       await loadQuotations();
 
@@ -375,12 +458,19 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
             ? 'Quotation confirmed. Please bring your vehicle to the workshop when ready.'
             : 'Quotation rejected. The workshop may prepare a new quotation if necessary.',
       );
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
+      );
+
+      await loadQuotations();
     } catch (error, stackTrace) {
       debugPrint(
         'Update quotation error: $error',
       );
-      debugPrintStack(
-        stackTrace: stackTrace,
+
+      debugPrint(
+        stackTrace.toString(),
       );
 
       showMessage(

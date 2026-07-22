@@ -15,6 +15,7 @@ class BookServicePage extends StatefulWidget {
 class _BookServicePageState extends State<BookServicePage> {
   String selectedFilter = 'Upcoming';
   bool isLoading = false;
+  bool isProcessingBooking = false;
   final ScrollController scrollController = ScrollController();
   bool showBackToTop = false;
   Map<String, dynamic>? currentCustomer;
@@ -486,20 +487,107 @@ class _BookServicePageState extends State<BookServicePage> {
     }
   }
 
-  Future<void> cancelBooking(Map<String, dynamic> booking) async {
-    try {
-      await supabase.from('bookings').update({
-        'status': 'Cancelled',
-      }).eq('booking_id', booking['booking_id']);
+  Future<void> cancelBooking(
+      Map<String, dynamic> booking,
+      ) async {
+    if (isProcessingBooking) return;
 
-      await notifyAdminsAboutCancelledBooking(booking: booking);
+    final bookingId =
+    booking['booking_id']
+        ?.toString()
+        .trim();
+
+    if (bookingId == null ||
+        bookingId.isEmpty) {
+      showMessage(
+        'Booking information is missing.',
+      );
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        isProcessingBooking = true;
+      });
+    }
+
+    try {
+      final rpcResult = await supabase.rpc(
+        'customer_cancel_booking',
+        params: {
+          'p_booking_id': bookingId,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid booking cancellation result was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['cancelled'] != true ||
+          result['status'] != 'Cancelled') {
+        throw Exception(
+          'The booking was not cancelled correctly.',
+        );
+      }
+
+      /*
+       * Notify admins only after the database
+       * transaction succeeds.
+       */
+      try {
+        await notifyAdminsAboutCancelledBooking(
+          booking: booking,
+        );
+      } catch (
+      notificationError,
+      stackTrace
+      ) {
+        debugPrint(
+          'Cancel booking notification failed: '
+              '$notificationError',
+        );
+
+        debugPrint(
+          stackTrace.toString(),
+        );
+      }
 
       await loadBookings();
-      showMessage('Booking cancelled successfully.');
-    } catch (error) {
-      showMessage('Failed to cancel booking: $error');
+
+      showMessage(
+        'Booking cancelled successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await loadBookings();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Customer cancel booking failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to cancel booking: $error',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isProcessingBooking = false;
+        });
+      }
     }
   }
+
   Future<void> notifyAdminsAboutUpdatedBooking({
     required Map<String, dynamic> booking,
     required DateTime newDate,
@@ -556,64 +644,137 @@ class _BookServicePageState extends State<BookServicePage> {
     required Map<String, dynamic> booking,
     required DateTime newDate,
     required String problem,
-    required List<Map<String, dynamic>> selectedServices,
+    required List<Map<String, dynamic>>
+    selectedServices,
   }) async {
+    if (isProcessingBooking) return;
+
+    final bookingId =
+    booking['booking_id']
+        ?.toString()
+        .trim();
+
+    if (bookingId == null ||
+        bookingId.isEmpty) {
+      showMessage(
+        'Booking information is missing.',
+      );
+      return;
+    }
+
+    final serviceIds = selectedServices
+        .map(
+          (service) =>
+          service['service_id']
+              ?.toString()
+              .trim(),
+    )
+        .whereType<String>()
+        .where(
+          (serviceId) =>
+      serviceId.isNotEmpty,
+    )
+        .toSet()
+        .toList();
+
+    if (serviceIds.isEmpty) {
+      showMessage(
+        'Please select at least one service.',
+      );
+      return;
+    }
+
+    final newSqlDate =
+    toSqlDate(newDate);
+
+    if (mounted) {
+      setState(() {
+        isProcessingBooking = true;
+      });
+    }
+
     try {
-      final newSqlDate = toSqlDate(newDate);
+      final rpcResult = await supabase.rpc(
+        'customer_update_booking',
+        params: {
+          'p_booking_id':
+          bookingId,
+          'p_appointment_date':
+          newSqlDate,
+          'p_problem_description':
+          problem.trim(),
+          'p_service_ids':
+          serviceIds,
+        },
+      );
 
-      final existingBooking = await supabase
-          .from('bookings')
-          .select('booking_id')
-          .eq(
-        'vehicle_id',
-        booking['vehicle_id'],
-      )
-          .eq(
-        'appointment_date',
-        newSqlDate,
-      )
-          .neq(
-        'booking_id',
-        booking['booking_id'],
-      )
-          .neq(
-        'status',
-        'Cancelled',
-      )
-          .limit(1);
-
-      if (existingBooking.isNotEmpty) {
-        showMessage(
-          'This vehicle already has another booking on the selected date.',
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid booking update result was returned.',
         );
-        return;
-      }
-      await supabase.from('bookings').update({
-        'appointment_date': newSqlDate,
-        'problem_description': problem.trim(),
-      }).eq('booking_id', booking['booking_id']);
-
-      await supabase.from('booking_services').delete().eq(
-        'booking_id',
-        booking['booking_id'],
-      );
-
-      for (final service in selectedServices) {
-        await supabase.from('booking_services').insert({
-          'booking_id': booking['booking_id'],
-          'service_id': service['service_id'],
-        });
       }
 
-      await notifyAdminsAboutUpdatedBooking(
-        booking: booking,
-        newDate: newDate,
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
       );
+
+      if (result['updated'] != true ||
+          result['booking_id'] == null) {
+        throw Exception(
+          'The booking was not updated correctly.',
+        );
+      }
+
+      /*
+       * Notify admins only after the database
+       * transaction succeeds.
+       */
+      try {
+        await notifyAdminsAboutUpdatedBooking(
+          booking: booking,
+          newDate: newDate,
+        );
+      } catch (
+      notificationError,
+      stackTrace
+      ) {
+        debugPrint(
+          'Update booking notification failed: '
+              '$notificationError',
+        );
+
+        debugPrint(
+          stackTrace.toString(),
+        );
+      }
 
       await loadBookings();
-      showMessage('Booking updated successfully.');
-    } catch (error) {
-      showMessage('Failed to update booking: $error');
+
+      showMessage(
+        'Booking updated successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await loadBookings();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Customer update booking failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to update booking: $error',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isProcessingBooking = false;
+        });
+      }
     }
   }
 

@@ -359,58 +359,110 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
     required String plate,
     required String model,
   }) async {
-    if (currentCustomer == null) return;
+    final upperPlate =
+    plate.trim().toUpperCase();
+    final upperModel =
+    model.trim().toUpperCase();
 
-    final upperPlate = plate.toUpperCase();
-    final upperModel = model.toUpperCase();
+    if (upperPlate.isEmpty ||
+        upperModel.isEmpty) {
+      showMessage(
+        'Please complete vehicle information.',
+      );
+      return;
+    }
 
     try {
-      final existingVehicle = await supabase
-          .from('vehicles')
-          .select()
-          .eq('plate_number', upperPlate)
-          .maybeSingle();
+      final rpcResult = await supabase.rpc(
+        'customer_add_vehicle',
+        params: {
+          'p_plate_number': upperPlate,
+          'p_car_model': upperModel,
+        },
+      );
 
-      if (existingVehicle != null) {
-        final existingCustomerId = existingVehicle['customer_id'];
-        final existingStatus =
-            existingVehicle['verification_status'] ?? 'Pending Claim';
-
-        if (existingCustomerId != null &&
-            existingCustomerId != currentCustomer!['customer_id'] &&
-            (existingStatus == 'Link Record' || existingStatus == 'Verified')) {
-          showMessage('This vehicle is already linked to another customer.');
-          return;
-        }
-
-        await supabase.from('vehicles').update({
-          'customer_id': currentCustomer!['customer_id'],
-          'customer_name': currentCustomer!['name'].toString().toUpperCase(),
-          'car_model': upperModel,
-          'verification_status': 'Pending Claim',
-        }).eq('vehicle_id', existingVehicle['vehicle_id']);
-      } else {
-        await supabase.from('vehicles').insert({
-          'plate_number': upperPlate,
-          'car_model': upperModel,
-          'customer_id': currentCustomer!['customer_id'],
-          'customer_name': currentCustomer!['name'].toString().toUpperCase(),
-          'verification_status': 'Pending Claim',
-        });
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid vehicle information was returned.',
+        );
       }
 
-      await notifyAdminsVehicleClaim(
-        plate: upperPlate,
-        model: upperModel,
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
       );
+
+      final vehicleId =
+      result['vehicle_id']
+          ?.toString();
+
+      final returnedPlate =
+      result['plate_number']
+          ?.toString()
+          .trim();
+
+      final returnedModel =
+      result['car_model']
+          ?.toString()
+          .trim();
+
+      if (vehicleId == null ||
+          vehicleId.isEmpty) {
+        throw Exception(
+          'Vehicle ID was not returned.',
+        );
+      }
+
+      try {
+        await notifyAdminsVehicleClaim(
+          plate:
+          returnedPlate == null ||
+              returnedPlate.isEmpty
+              ? upperPlate
+              : returnedPlate,
+          model:
+          returnedModel == null ||
+              returnedModel.isEmpty
+              ? upperModel
+              : returnedModel,
+        );
+      } catch (
+      notificationError,
+      stackTrace
+      ) {
+        debugPrint(
+          'Vehicle claim notification failed: '
+              '$notificationError',
+        );
+
+        debugPrint(
+          stackTrace.toString(),
+        );
+      }
 
       await loadData();
 
       showMessage(
         'Vehicle added. You can book appointment while waiting for admin confirmation.',
       );
-    } catch (error) {
-      showMessage('Failed to add vehicle: $error');
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
+      );
+
+      await loadData();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Add customer vehicle failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to add vehicle: $error',
+      );
     }
   }
 
@@ -419,34 +471,201 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
     required String plate,
     required String model,
   }) async {
-    final upperPlate = plate.toUpperCase();
-    final upperModel = model.toUpperCase();
-    try {
-      await supabase.from('vehicles').update({
-        'plate_number': upperPlate,
-        'car_model': upperModel,
-        'verification_status': 'Pending Claim',
-      }).eq('vehicle_id', vehicleId);
+    final normalizedVehicleId =
+    vehicleId.trim();
 
-      await notifyAdminsVehicleClaim(
-        plate: upperPlate,
-        model: upperModel,
+    final upperPlate =
+    plate.trim().toUpperCase();
+
+    final upperModel =
+    model.trim().toUpperCase();
+
+    if (normalizedVehicleId.isEmpty) {
+      showMessage(
+        'Vehicle information is missing.',
       );
+      return;
+    }
+
+    if (upperPlate.isEmpty ||
+        upperModel.isEmpty) {
+      showMessage(
+        'Please complete vehicle information.',
+      );
+      return;
+    }
+
+    try {
+      final rpcResult = await supabase.rpc(
+        'customer_update_vehicle',
+        params: {
+          'p_vehicle_id':
+          normalizedVehicleId,
+          'p_plate_number':
+          upperPlate,
+          'p_car_model':
+          upperModel,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid vehicle information was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      final returnedVehicleId =
+      result['vehicle_id']
+          ?.toString();
+
+      final returnedPlate =
+      result['plate_number']
+          ?.toString()
+          .trim();
+
+      final returnedModel =
+      result['car_model']
+          ?.toString()
+          .trim();
+
+      final verificationStatus =
+      result['verification_status']
+          ?.toString();
+
+      if (returnedVehicleId == null ||
+          returnedVehicleId.isEmpty) {
+        throw Exception(
+          'Vehicle ID was not returned.',
+        );
+      }
+
+      if (verificationStatus !=
+          'Pending Claim') {
+        throw Exception(
+          'The vehicle was not returned to Pending Claim status.',
+        );
+      }
+
+      try {
+        await notifyAdminsVehicleClaim(
+          plate:
+          returnedPlate == null ||
+              returnedPlate.isEmpty
+              ? upperPlate
+              : returnedPlate,
+          model:
+          returnedModel == null ||
+              returnedModel.isEmpty
+              ? upperModel
+              : returnedModel,
+        );
+      } catch (
+      notificationError,
+      stackTrace
+      ) {
+        debugPrint(
+          'Vehicle update notification failed: '
+              '$notificationError',
+        );
+
+        debugPrint(
+          stackTrace.toString(),
+        );
+      }
+
       await loadData();
-      showMessage('Vehicle updated. Status changed to Pending Claim.');
-    } catch (error) {
-      showMessage('Failed to update vehicle: $error');
+
+      showMessage(
+        'Vehicle updated. Status changed to Pending Claim.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
+      );
+
+      await loadData();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Update customer vehicle failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to update vehicle: $error',
+      );
     }
   }
 
-  Future<void> deleteVehicle(String vehicleId) async {
+  Future<void> deleteVehicle(
+      String vehicleId,
+      ) async {
+    final normalizedVehicleId =
+    vehicleId.trim();
+
+    if (normalizedVehicleId.isEmpty) {
+      showMessage(
+        'Vehicle information is missing.',
+      );
+      return;
+    }
+
     try {
-      await supabase.from('vehicles').delete().eq('vehicle_id', vehicleId);
+      final rpcResult = await supabase.rpc(
+        'customer_delete_vehicle',
+        params: {
+          'p_vehicle_id':
+          normalizedVehicleId,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid deletion result was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['deleted'] != true) {
+        throw Exception(
+          'The vehicle was not deleted.',
+        );
+      }
 
       await loadData();
-      showMessage('Vehicle deleted successfully.');
-    } catch (error) {
-      showMessage('Failed to delete vehicle: $error');
+
+      showMessage(
+        'Vehicle deleted successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
+      );
+
+      await loadData();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Delete customer vehicle failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to delete vehicle: $error',
+      );
     }
   }
 
@@ -739,25 +958,35 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
             ),
           ),
           actions: [
+            if (status != 'Verified' &&
+                status != 'Link Record')
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  showEditVehicleDialog(
+                    vehicle,
+                  );
+                },
+                child: const Text('Edit'),
+              ),
             TextButton(
               onPressed: () {
                 Navigator.pop(context);
-                showEditVehicleDialog(vehicle);
-              },
-              child: const Text('Edit'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                showDeleteVehicleDialog(vehicle['vehicle_id'].toString());
+                showDeleteVehicleDialog(
+                  vehicle['vehicle_id']
+                      .toString(),
+                );
               },
               child: const Text(
                 'Delete',
-                style: TextStyle(color: Colors.red),
+                style: TextStyle(
+                  color: Colors.red,
+                ),
               ),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () =>
+                  Navigator.pop(context),
               child: const Text('Close'),
             ),
           ],

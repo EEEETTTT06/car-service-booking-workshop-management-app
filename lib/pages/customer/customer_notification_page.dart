@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../services/supabase_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../services/supabase_service.dart';
 
 class CustomerNotificationPage extends StatefulWidget {
   const CustomerNotificationPage({super.key});
@@ -139,14 +141,40 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
   }
 
   Future<void> markAsRead(Map<String, dynamic> item) async {
+    if (item['is_read'] == true) return;
+
+    final notificationId =
+    item['notification_id']?.toString().trim();
+
+    if (notificationId == null || notificationId.isEmpty) {
+      showMessage('Notification information is missing.');
+      return;
+    }
+
     try {
-      if (item['is_read'] == true) return;
+      final rpcResult = await supabase.rpc(
+        'customer_notification_action',
+        params: {
+          'p_action': 'mark_read',
+          'p_notification_id': notificationId,
+        },
+      );
 
-      await supabase
-          .from('notifications')
-          .update({'is_read': true})
-          .eq('notification_id', item['notification_id']);
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid notification update result was returned.',
+        );
+      }
 
+      final result = Map<String, dynamic>.from(rpcResult);
+
+      if (result['completed'] != true) {
+        throw Exception('The notification was not updated.');
+      }
+
+      await loadNotifications();
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
       await loadNotifications();
     } catch (error) {
       showMessage('Failed to update notification: $error');
@@ -155,18 +183,31 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
 
   Future<void> markAllAsRead() async {
     try {
-      if (currentCustomer == null) {
-        await fetchCurrentCustomer();
+      final rpcResult = await supabase.rpc(
+        'customer_notification_action',
+        params: {
+          'p_action': 'mark_all_read',
+          'p_notification_id': null,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid notification update result was returned.',
+        );
       }
 
-      await supabase
-          .from('notifications')
-          .update({'is_read': true})
-          .eq('customer_id', currentCustomer!['customer_id'])
-          .eq('is_read', false);
+      final result = Map<String, dynamic>.from(rpcResult);
+
+      if (result['completed'] != true) {
+        throw Exception('Notifications were not updated.');
+      }
 
       await loadNotifications();
       showMessage('All notifications marked as read.');
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await loadNotifications();
     } catch (error) {
       showMessage('Failed to mark all as read: $error');
     }
@@ -175,15 +216,38 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
   Future<void> deleteNotification(
       Map<String, dynamic> item,
       ) async {
-    final deletedItem = Map<String, dynamic>.from(item);
+    final notificationId =
+    item['notification_id']?.toString().trim();
+
+    if (notificationId == null || notificationId.isEmpty) {
+      showMessage('Notification information is missing.');
+      return;
+    }
 
     try {
-      await supabase
-          .from('notifications')
-          .delete()
-          .eq(
-        'notification_id',
-        item['notification_id'],
+      final rpcResult = await supabase.rpc(
+        'customer_notification_action',
+        params: {
+          'p_action': 'delete',
+          'p_notification_id': notificationId,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid notification deletion result was returned.',
+        );
+      }
+
+      final result = Map<String, dynamic>.from(rpcResult);
+
+      if (result['completed'] != true ||
+          result['deleted_item'] is! Map) {
+        throw Exception('The notification was not deleted.');
+      }
+
+      final deletedItem = Map<String, dynamic>.from(
+        result['deleted_item'] as Map,
       );
 
       await loadNotifications();
@@ -202,17 +266,16 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
             label: 'UNDO',
             textColor: Colors.amber,
             onPressed: () async {
-              await restoreDeletedNotification(
-                deletedItem,
-              );
+              await restoreDeletedNotification(deletedItem);
             },
           ),
         ),
       );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await loadNotifications();
     } catch (error) {
-      showMessage(
-        'Failed to delete notification: $error',
-      );
+      showMessage('Failed to delete notification: $error');
     }
   }
 
@@ -220,16 +283,32 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
       Map<String, dynamic> deletedItem,
       ) async {
     try {
-      await supabase
-          .from('notifications')
-          .insert(deletedItem);
+      final rpcResult = await supabase.rpc(
+        'customer_restore_notification',
+        params: {
+          'p_notification': deletedItem,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid notification restore result was returned.',
+        );
+      }
+
+      final result = Map<String, dynamic>.from(rpcResult);
+
+      if (result['restored'] != true) {
+        throw Exception('The notification was not restored.');
+      }
 
       await loadNotifications();
       showMessage('Notification restored.');
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await loadNotifications();
     } catch (error) {
-      showMessage(
-        'Failed to restore notification: $error',
-      );
+      showMessage('Failed to restore notification: $error');
     }
   }
 
@@ -305,17 +384,31 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
 
   Future<void> clearAllNotifications() async {
     try {
-      if (currentCustomer == null) {
-        await fetchCurrentCustomer();
+      final rpcResult = await supabase.rpc(
+        'customer_notification_action',
+        params: {
+          'p_action': 'clear_all',
+          'p_notification_id': null,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid notification deletion result was returned.',
+        );
       }
 
-      await supabase
-          .from('notifications')
-          .delete()
-          .eq('customer_id', currentCustomer!['customer_id']);
+      final result = Map<String, dynamic>.from(rpcResult);
+
+      if (result['completed'] != true) {
+        throw Exception('Notifications were not cleared.');
+      }
 
       await loadNotifications();
       showMessage('All notifications cleared.');
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await loadNotifications();
     } catch (error) {
       showMessage('Failed to clear notifications: $error');
     }

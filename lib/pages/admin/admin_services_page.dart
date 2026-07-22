@@ -167,18 +167,96 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
     required String price,
     required String status,
   }) async {
+    final normalizedName =
+    name.trim().toUpperCase();
+
+    final normalizedDescription =
+    description.trim();
+
+    final parsedPrice =
+    double.tryParse(price.trim());
+
+    if (normalizedName.isEmpty) {
+      showMessage(
+        'Please enter the service name.',
+      );
+      return;
+    }
+
+    if (parsedPrice == null ||
+        parsedPrice < 0) {
+      showMessage(
+        'Please enter a valid service price.',
+      );
+      return;
+    }
+
+    if (status != 'Available' &&
+        status != 'Unavailable') {
+      showMessage(
+        'The selected service status is invalid.',
+      );
+      return;
+    }
+
     try {
-      await supabase.from('services').insert({
-        'service_name': name,
-        'description': description,
-        'price': double.parse(price),
-        'availability_status': status,
-      });
+      final rpcResult = await supabase.rpc(
+        'admin_create_service',
+        params: {
+          'p_service_name':
+          normalizedName,
+          'p_description':
+          normalizedDescription,
+          'p_price':
+          parsedPrice,
+          'p_availability_status':
+          status,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid service information was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      final serviceId =
+      result['service_id']
+          ?.toString();
+
+      if (serviceId == null ||
+          serviceId.isEmpty ||
+          result['created'] != true) {
+        throw Exception(
+          'The service was not created correctly.',
+        );
+      }
 
       await fetchServices();
-      showMessage('Service added successfully.');
-    } catch (error) {
-      showMessage('Failed to add service: $error');
+
+      showMessage(
+        'Service added successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await fetchServices();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin add service failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to add service: $error',
+      );
     }
   }
 
@@ -189,29 +267,170 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
     required String price,
     required String status,
   }) async {
+    final normalizedServiceId =
+    serviceId.trim();
+
+    final normalizedName =
+    name.trim().toUpperCase();
+
+    final normalizedDescription =
+    description.trim();
+
+    final parsedPrice =
+    double.tryParse(price.trim());
+
+    if (normalizedServiceId.isEmpty) {
+      showMessage(
+        'Service information is missing.',
+      );
+      return;
+    }
+
+    if (normalizedName.isEmpty) {
+      showMessage(
+        'Please enter the service name.',
+      );
+      return;
+    }
+
+    if (parsedPrice == null ||
+        parsedPrice < 0) {
+      showMessage(
+        'Please enter a valid service price.',
+      );
+      return;
+    }
+
+    if (status != 'Available' &&
+        status != 'Unavailable') {
+      showMessage(
+        'The selected service status is invalid.',
+      );
+      return;
+    }
+
     try {
-      await supabase.from('services').update({
-        'service_name': name,
-        'description': description,
-        'price': double.parse(price),
-        'availability_status': status,
-      }).eq('service_id', serviceId);
+      final rpcResult = await supabase.rpc(
+        'admin_update_service',
+        params: {
+          'p_service_id':
+          normalizedServiceId,
+          'p_service_name':
+          normalizedName,
+          'p_description':
+          normalizedDescription,
+          'p_price':
+          parsedPrice,
+          'p_availability_status':
+          status,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid service information was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      final returnedServiceId =
+      result['service_id']
+          ?.toString();
+
+      if (returnedServiceId == null ||
+          returnedServiceId.isEmpty ||
+          result['updated'] != true) {
+        throw Exception(
+          'The service was not updated correctly.',
+        );
+      }
 
       await fetchServices();
-      showMessage('Service updated successfully.');
-    } catch (error) {
-      showMessage('Failed to update service: $error');
+
+      showMessage(
+        'Service updated successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await fetchServices();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin update service failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to update service: $error',
+      );
     }
   }
 
-  Future<void> deleteService(String serviceId) async {
+  Future<void> deleteService(
+      String serviceId,
+      ) async {
+    final normalizedServiceId =
+    serviceId.trim();
+
+    if (normalizedServiceId.isEmpty) {
+      showMessage(
+        'Service information is missing.',
+      );
+      return;
+    }
+
     try {
-      await supabase.from('services').delete().eq('service_id', serviceId);
+      final rpcResult = await supabase.rpc(
+        'admin_delete_service',
+        params: {
+          'p_service_id':
+          normalizedServiceId,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid service deletion result was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['deleted'] != true) {
+        throw Exception(
+          'The service was not deleted.',
+        );
+      }
 
       await fetchServices();
-      showMessage('Service deleted successfully.');
-    } catch (error) {
-      showMessage('Failed to delete service: $error');
+
+      showMessage(
+        'Service deleted successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await fetchServices();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin delete service failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to delete service: $error',
+      );
     }
   }
 
@@ -486,7 +705,7 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'This action cannot be undone.',
+                          'Services already used by booking records cannot be deleted. Set the service as Unavailable instead.',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.black54,

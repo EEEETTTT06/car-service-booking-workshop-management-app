@@ -201,32 +201,33 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
   }
 
   Future<void> createVehicleClaimNotification({
-    required Map<String, dynamic> vehicle,
+    required String customerId,
+    required String vehicleId,
     required String title,
     required String message,
   }) async {
-    final customerId = vehicle['customer_id'];
-
-    if (customerId == null) return;
-
-    await supabase.from('notifications').insert({
+    await supabase
+        .from('notifications')
+        .insert({
       'customer_id': customerId,
-      'vehicle_id': vehicle['vehicle_id'],
+      'vehicle_id': vehicleId,
       'title': title,
       'message': message,
-      'notification_type': 'vehicle_claim',
+      'notification_type':
+      'vehicle_claim',
       'target_page': 'my_vehicles',
       'is_read': false,
     });
 
     await sendFcmPushNotification(
-      customerId: customerId.toString(),
+      customerId: customerId,
       title: title,
       message: message,
       data: {
-        'notification_type': 'vehicle_claim',
+        'notification_type':
+        'vehicle_claim',
         'target_page': 'my_vehicles',
-        'vehicle_id': vehicle['vehicle_id'],
+        'vehicle_id': vehicleId,
       },
     );
   }
@@ -236,22 +237,87 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
     required String model,
     Map<String, dynamic>? customer,
   }) async {
-    try {
-      final hasCustomer = customer != null;
+    final normalizedPlate =
+    plate.trim().toUpperCase();
 
-      await supabase.from('vehicles').insert({
-        'plate_number': plate.toUpperCase(),
-        'car_model': model.toUpperCase(),
-        'customer_id': hasCustomer ? customer['customer_id'] : null,
-        'customer_name':
-        hasCustomer ? customer['name'].toString().toUpperCase() : '',
-        'verification_status': hasCustomer ? 'Verified' : 'Pending Claim',
-      });
+    final normalizedModel =
+    model.trim().toUpperCase();
+
+    if (normalizedPlate.isEmpty ||
+        normalizedModel.isEmpty) {
+      showMessage(
+        'Please enter plate number and car model.',
+      );
+      return;
+    }
+
+    final customerId =
+    customer?['customer_id']
+        ?.toString()
+        .trim();
+
+    try {
+      final rpcResult = await supabase.rpc(
+        'admin_create_vehicle',
+        params: {
+          'p_plate_number':
+          normalizedPlate,
+          'p_car_model':
+          normalizedModel,
+          'p_customer_id':
+          customerId == null ||
+              customerId.isEmpty
+              ? null
+              : customerId,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid vehicle information was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      final vehicleId =
+      result['vehicle_id']
+          ?.toString();
+
+      if (vehicleId == null ||
+          vehicleId.isEmpty ||
+          result['created'] != true) {
+        throw Exception(
+          'The vehicle was not created correctly.',
+        );
+      }
 
       await fetchVehicles();
-      showMessage('Vehicle added successfully.');
-    } catch (error) {
-      showMessage('Failed to add vehicle: $error');
+
+      showMessage(
+        'Vehicle added successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
+      );
+
+      await fetchVehicles();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin add vehicle failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to add vehicle: $error',
+      );
     }
   }
 
@@ -261,90 +327,361 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
     required String model,
     Map<String, dynamic>? customer,
   }) async {
-    try {
-      final hasCustomer = customer != null;
+    final normalizedVehicleId =
+    vehicleId.trim();
 
-      await supabase.from('vehicles').update({
-        'plate_number': plate.toUpperCase(),
-        'car_model': model.toUpperCase(),
-        'customer_id': hasCustomer ? customer['customer_id'] : null,
-        'customer_name':
-        hasCustomer ? customer['name'].toString().toUpperCase() : '',
-        'verification_status': hasCustomer ? 'Verified' : 'Pending Claim',
-      }).eq('vehicle_id', vehicleId);
+    final normalizedPlate =
+    plate.trim().toUpperCase();
+
+    final normalizedModel =
+    model.trim().toUpperCase();
+
+    if (normalizedVehicleId.isEmpty) {
+      showMessage(
+        'Vehicle information is missing.',
+      );
+      return;
+    }
+
+    if (normalizedPlate.isEmpty ||
+        normalizedModel.isEmpty) {
+      showMessage(
+        'Please enter plate number and car model.',
+      );
+      return;
+    }
+
+    final customerId =
+    customer?['customer_id']
+        ?.toString()
+        .trim();
+
+    try {
+      final rpcResult = await supabase.rpc(
+        'admin_update_vehicle',
+        params: {
+          'p_vehicle_id':
+          normalizedVehicleId,
+          'p_plate_number':
+          normalizedPlate,
+          'p_car_model':
+          normalizedModel,
+          'p_customer_id':
+          customerId == null ||
+              customerId.isEmpty
+              ? null
+              : customerId,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid vehicle information was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      final returnedVehicleId =
+      result['vehicle_id']
+          ?.toString();
+
+      if (returnedVehicleId == null ||
+          returnedVehicleId.isEmpty ||
+          result['updated'] != true) {
+        throw Exception(
+          'The vehicle was not updated correctly.',
+        );
+      }
 
       await fetchVehicles();
-      showMessage('Vehicle updated successfully.');
-    } catch (error) {
-      showMessage('Failed to update vehicle: $error');
-    }
-  }
 
-  Future<void> approveVehicleClaim(Map<String, dynamic> vehicle) async {
-    try {
-      final plate = vehicle['plate_number'] ?? 'your vehicle';
-
-      await supabase.from('vehicles').update({
-        'verification_status': 'Verified',
-      }).eq('vehicle_id', vehicle['vehicle_id']);
-
-      await createVehicleClaimNotification(
-        vehicle: vehicle,
-        title: 'Vehicle Claim Approved',
-        message: 'Your vehicle claim for $plate has been approved.',
+      showMessage(
+        'Vehicle updated successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
       );
 
       await fetchVehicles();
-      showMessage('Vehicle claim approved.');
-    } catch (error) {
-      showMessage('Failed to approve claim: $error');
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin update vehicle failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to update vehicle: $error',
+      );
     }
   }
 
-  Future<void> rejectVehicleClaim(Map<String, dynamic> vehicle) async {
+  Future<void> processVehicleClaim({
+    required Map<String, dynamic> vehicle,
+    required String action,
+  }) async {
+    final vehicleId =
+    vehicle['vehicle_id']?.toString().trim();
+
+    if (vehicleId == null || vehicleId.isEmpty) {
+      showMessage(
+        'Vehicle information is missing.',
+      );
+      return;
+    }
+
+    if (action != 'approve' &&
+        action != 'reject' &&
+        action != 'unclaim') {
+      showMessage(
+        'The vehicle claim action is invalid.',
+      );
+      return;
+    }
+
     try {
-      final plate = vehicle['plate_number'] ?? 'your vehicle';
+      final rpcResult = await supabase.rpc(
+        'admin_process_vehicle_claim',
+        params: {
+          'p_vehicle_id': vehicleId,
+          'p_action': action,
+        },
+      );
 
-      await supabase.from('vehicles').update({
-        'verification_status': 'Rejected',
-      }).eq('vehicle_id', vehicle['vehicle_id']);
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid vehicle claim information was returned.',
+        );
+      }
 
-      await createVehicleClaimNotification(
-        vehicle: vehicle,
-        title: 'Vehicle Claim Rejected',
-        message: 'Your vehicle claim for $plate has been rejected.',
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      final returnedVehicleId =
+      result['vehicle_id']?.toString();
+
+      final originalCustomerId =
+      result['original_customer_id']
+          ?.toString();
+
+      final plateValue =
+      result['plate_number']
+          ?.toString()
+          .trim();
+
+      final plate =
+      plateValue == null ||
+          plateValue.isEmpty
+          ? 'your vehicle'
+          : plateValue;
+
+      final verificationStatus =
+      result['verification_status']
+          ?.toString();
+
+      if (returnedVehicleId == null ||
+          returnedVehicleId.isEmpty) {
+        throw Exception(
+          'Vehicle ID was not returned.',
+        );
+      }
+
+      if ((action == 'approve' ||
+          action == 'reject') &&
+          originalCustomerId != null &&
+          originalCustomerId.isNotEmpty) {
+        try {
+          final approved =
+              action == 'approve';
+
+          final title = approved
+              ? 'Vehicle Claim Approved'
+              : 'Vehicle Claim Rejected';
+
+          final message = approved
+              ? 'Your vehicle claim for $plate has been approved.'
+              : 'Your vehicle claim for $plate has been rejected.';
+
+          await createVehicleClaimNotification(
+            customerId:
+            originalCustomerId,
+            vehicleId:
+            returnedVehicleId,
+            title: title,
+            message: message,
+          );
+        } catch (
+        notificationError,
+        stackTrace
+        ) {
+          debugPrint(
+            'Vehicle claim notification failed: '
+                '$notificationError',
+          );
+
+          debugPrint(
+            stackTrace.toString(),
+          );
+        }
+      }
+
+      await fetchVehicles();
+
+      if (!mounted) return;
+
+      if (action == 'approve') {
+        if (verificationStatus !=
+            'Verified') {
+          throw Exception(
+            'The vehicle claim was not approved correctly.',
+          );
+        }
+
+        showMessage(
+          'Vehicle claim approved.',
+        );
+      } else if (action == 'reject') {
+        if (verificationStatus !=
+            'Rejected') {
+          throw Exception(
+            'The vehicle claim was not rejected correctly.',
+          );
+        }
+
+        showMessage(
+          'Vehicle claim rejected.',
+        );
+      } else {
+        if (verificationStatus !=
+            'Pending Claim') {
+          throw Exception(
+            'The vehicle ownership link was not removed correctly.',
+          );
+        }
+
+        showMessage(
+          'Vehicle set as unclaimed.',
+        );
+      }
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
       );
 
       await fetchVehicles();
-      showMessage('Vehicle claim rejected.');
-    } catch (error) {
-      showMessage('Failed to reject claim: $error');
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Vehicle claim action failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to update vehicle claim: $error',
+      );
     }
   }
 
-  Future<void> setVehicleUnclaim(Map<String, dynamic> vehicle) async {
-    try {
-      await supabase.from('vehicles').update({
-        'customer_id': null,
-        'customer_name': '',
-        'verification_status': 'Pending Claim',
-      }).eq('vehicle_id', vehicle['vehicle_id']);
-
-      await fetchVehicles();
-      showMessage('Vehicle set as unclaimed.');
-    } catch (error) {
-      showMessage('Failed to set vehicle as unclaimed: $error');
-    }
+  Future<void> approveVehicleClaim(
+      Map<String, dynamic> vehicle,
+      ) {
+    return processVehicleClaim(
+      vehicle: vehicle,
+      action: 'approve',
+    );
   }
 
-  Future<void> deleteVehicle(String vehicleId) async {
+  Future<void> rejectVehicleClaim(
+      Map<String, dynamic> vehicle,
+      ) {
+    return processVehicleClaim(
+      vehicle: vehicle,
+      action: 'reject',
+    );
+  }
+
+  Future<void> setVehicleUnclaim(
+      Map<String, dynamic> vehicle,
+      ) {
+    return processVehicleClaim(
+      vehicle: vehicle,
+      action: 'unclaim',
+    );
+  }
+
+  Future<void> deleteVehicle(
+      String vehicleId,
+      ) async {
+    final normalizedVehicleId =
+    vehicleId.trim();
+
+    if (normalizedVehicleId.isEmpty) {
+      showMessage(
+        'Vehicle information is missing.',
+      );
+      return;
+    }
+
     try {
-      await supabase.from('vehicles').delete().eq('vehicle_id', vehicleId);
+      final rpcResult = await supabase.rpc(
+        'admin_delete_vehicle',
+        params: {
+          'p_vehicle_id':
+          normalizedVehicleId,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid vehicle deletion result was returned.',
+        );
+      }
+
+      final result =
+      Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['deleted'] != true) {
+        throw Exception(
+          'The vehicle was not deleted.',
+        );
+      }
 
       await fetchVehicles();
-      showMessage('Vehicle deleted successfully.');
-    } catch (error) {
-      showMessage('Failed to delete vehicle: $error');
+
+      showMessage(
+        'Vehicle deleted successfully.',
+      );
+    } on PostgrestException catch (error) {
+      showMessage(
+        error.message,
+      );
+
+      await fetchVehicles();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin delete vehicle failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      showMessage(
+        'Failed to delete vehicle: $error',
+      );
     }
   }
 
