@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_service.dart';
+import '../common/app_result_message.dart';
 
 class CustomerSettingsPage extends StatefulWidget {
   final bool notificationOn;
@@ -50,24 +51,18 @@ class _CustomerSettingsPageState extends State<CustomerSettingsPage> {
 
       widget.onNotificationChanged(value);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            value
-                ? 'Notifications turned on.'
-                : 'Notifications turned off.',
-          ),
-        ),
+      AppResultMessage.success(
+        context,
+        message: value
+            ? 'Notifications turned on.'
+            : 'Notifications turned off.',
       );
     } catch (error) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed to update notification setting: $error',
-          ),
-        ),
+      AppResultMessage.error(
+        context,
+        message: 'Failed to update notification setting: $error',
       );
     } finally {
       if (mounted) {

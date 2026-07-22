@@ -5,7 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'admin_sidebar.dart';
+import '../../services/customer_notification_service.dart';
 import '../../services/supabase_service.dart';
+import '../common/app_result_message.dart';
 
 class AdminAppointmentCalendarPage extends StatefulWidget {
   const AdminAppointmentCalendarPage({super.key});
@@ -22,6 +24,7 @@ class _AdminAppointmentCalendarPageState
 
   bool isLoading = false;
   bool isMonthRefreshing = false;
+  bool isUpdatingDateSetting = false;
 
   Map<String, Map<String, dynamic>> dateSettings = {};
   Map<String, int> bookingCounts = {};
@@ -246,107 +249,6 @@ class _AdminAppointmentCalendarPageState
     }
   }
 
-  Future<void> sendWorkshopClosedNotice({
-    required DateTime date,
-    required String reason,
-  }) async {
-    try {
-      final customers = await supabase
-          .from('customers')
-          .select('customer_id, fcm_token');
-
-      final title = 'Workshop Closed Notice';
-      final message =
-          'Workshop will be closed on ${displayDate(date)}. Reason: $reason';
-
-      for (final customer in customers) {
-        final customerId = customer['customer_id'];
-        final token = customer['fcm_token']?.toString();
-
-        if (customerId == null) continue;
-
-        await supabase.from('notifications').insert({
-          'customer_id': customerId,
-          'title': title,
-          'message': message,
-          'notification_type': 'Workshop Closed',
-          'is_read': false,
-        });
-
-        if (token != null && token.isNotEmpty) {
-          await supabase.functions.invoke(
-            'send-fcm',
-            body: {
-              'token': token,
-              'title': title,
-              'body': message,
-            },
-          );
-        }
-      }
-    } catch (error) {
-      debugPrint('Failed to send workshop closed notice: $error');
-    }
-  }
-
-  Future<void> rejectBookingsForClosedDate({
-    required DateTime date,
-    required String reason,
-  }) async {
-    final dateKey = toSqlDate(date);
-
-    final response = await supabase.from('bookings').select('''
-    booking_id,
-    customer_id,
-    vehicle_id,
-    appointment_date,
-    customers(name, fcm_token),
-    vehicles(plate_number, car_model)
-  ''').eq('appointment_date', dateKey)
-        .neq('status', 'Cancelled')
-        .neq('status', 'Rejected');
-
-    final existingBookings = List<Map<String, dynamic>>.from(response);
-
-    for (final booking in existingBookings) {
-      await supabase.from('bookings').update({
-        'status': 'Rejected',
-        'rejection_reason': reason,
-      }).eq('booking_id', booking['booking_id']);
-
-      final customerId = booking['customer_id'];
-      final token = booking['customers']?['fcm_token']?.toString();
-      final plate = booking['vehicles']?['plate_number'] ?? 'your vehicle';
-
-      final title = 'Appointment Rejected';
-      final message =
-          'Your appointment for $plate on ${displayDate(date)} has been rejected because the workshop is closed. Reason: $reason';
-
-      if (customerId != null) {
-        await supabase.from('notifications').insert({
-          'customer_id': customerId,
-          'booking_id': booking['booking_id'],
-          'vehicle_id': booking['vehicle_id'],
-          'title': title,
-          'message': message,
-          'notification_type': 'Appointment Rejected',
-          'is_read': false,
-        });
-      }
-
-      if (token != null && token.isNotEmpty) {
-        await supabase.functions.invoke(
-          'send-fcm',
-          body: {
-            'token': token,
-            'title': title,
-            'body': message,
-          },
-        );
-      }
-    }
-  }
-
   Future<void> updateDateSetting({
     required DateTime date,
     required int limit,
@@ -354,42 +256,167 @@ class _AdminAppointmentCalendarPageState
     required String reason,
     bool rejectExistingBookings = false,
   }) async {
+    if (isUpdatingDateSetting) return;
+
     final dateKey = toSqlDate(date);
     final finalReason = reason.trim().isEmpty
         ? 'Workshop is closed on this date.'
         : reason.trim();
 
+    if (!isClosed && limit <= 0) {
+      showMessage(
+        'Please enter a valid appointment limit.',
+      );
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        isUpdatingDateSetting = true;
+      });
+    }
+
     try {
-      if (isClosed && rejectExistingBookings) {
-        await rejectBookingsForClosedDate(
-          date: date,
-          reason: finalReason,
+      final rpcResult = await supabase.rpc(
+        'admin_update_appointment_date_setting',
+        params: {
+          'p_appointment_date': dateKey,
+          'p_daily_limit': limit,
+          'p_is_closed': isClosed,
+          'p_closed_reason':
+          isClosed ? finalReason : null,
+          'p_reject_existing_bookings':
+          rejectExistingBookings,
+        },
+      );
+
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid appointment date result was returned.',
         );
       }
 
-      await supabase.from('appointment_date_settings').upsert({
-        'appointment_date': dateKey,
-        'daily_limit': isClosed ? null : limit,
-        'is_closed': isClosed,
-        'closed_reason': isClosed ? finalReason : null,
-      }, onConflict: 'appointment_date');
+      final result = Map<String, dynamic>.from(
+        rpcResult,
+      );
 
+      if (result['updated'] != true) {
+        throw Exception(
+          'The appointment date was not updated correctly.',
+        );
+      }
+
+      /*
+       * Notification history is created inside the RPC.
+       * FCM is sent only after the database transaction succeeds.
+       */
       if (isClosed) {
-        await sendWorkshopClosedNotice(
-          date: date,
-          reason: finalReason,
-        );
+        try {
+          final rejectedItems =
+          List<Map<String, dynamic>>.from(
+            result['rejected_bookings'] as List? ?? const [],
+          );
+
+          for (final item in rejectedItems) {
+            final customerId =
+            item['customer_id']?.toString().trim();
+
+            final title =
+                item['title']?.toString() ??
+                    'Appointment Rejected';
+
+            final message =
+                item['message']?.toString() ?? '';
+
+            if (customerId == null ||
+                customerId.isEmpty ||
+                message.isEmpty) {
+              continue;
+            }
+
+            await CustomerNotificationService.sendToAllDevices(
+              customerId: customerId,
+              title: title,
+              message: message,
+              data: {
+                'target_page': 'my_bookings',
+                'booking_id':
+                item['booking_id']?.toString() ?? '',
+                'vehicle_id':
+                item['vehicle_id']?.toString() ?? '',
+              },
+            );
+          }
+
+          final noticeTitle =
+              result['workshop_notice_title']?.toString() ??
+                  'Workshop Closed Notice';
+
+          final noticeMessage =
+              result['workshop_notice_message']?.toString() ??
+                  'Workshop will be closed on ${displayDate(date)}. Reason: $finalReason';
+
+          final notifiedCustomerIds =
+          (result['notified_customer_ids'] as List? ?? const [])
+              .map((value) => value.toString().trim())
+              .where((value) => value.isNotEmpty)
+              .toSet();
+
+          for (final customerId in notifiedCustomerIds) {
+            await CustomerNotificationService.sendToAllDevices(
+              customerId: customerId,
+              title: noticeTitle,
+              message: noticeMessage,
+              data: const {
+                'target_page': 'my_bookings',
+              },
+            );
+          }
+        } catch (notificationError, stackTrace) {
+          debugPrint(
+            'Appointment date FCM delivery failed: '
+                '$notificationError',
+          );
+          debugPrint(stackTrace.toString());
+        }
       }
 
-      await loadCalendarData(showLoading: false);
+      await loadCalendarData(
+        showLoading: false,
+      );
+
+      final rejectedCount = int.tryParse(
+        result['rejected_count']?.toString() ?? '0',
+      ) ??
+          0;
 
       showUpdatedMessage(
         isClosed
-            ? 'Workshop has been closed for ${displayDate(date)}.'
+            ? rejectedCount > 0
+            ? 'Workshop has been closed for ${displayDate(date)}. $rejectedCount booking(s) were rejected.'
+            : 'Workshop has been closed for ${displayDate(date)}.'
             : 'Appointment limit has been updated for ${displayDate(date)}.',
       );
-    } catch (error) {
-      showMessage('Failed to update date setting: $error');
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await loadCalendarData(
+        showLoading: false,
+      );
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin appointment date update failed: $error',
+      );
+      debugPrint(stackTrace.toString());
+
+      showMessage(
+        'Failed to update date setting: $error',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isUpdatingDateSetting = false;
+        });
+      }
     }
   }
 
@@ -1124,8 +1151,9 @@ class _AdminAppointmentCalendarPageState
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

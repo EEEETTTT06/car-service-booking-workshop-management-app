@@ -7,6 +7,7 @@ import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 import '../../services/customer_notification_service.dart';
+import '../common/app_result_message.dart';
 
 class AdminQuotationsPage extends StatefulWidget {
   final Map<String, dynamic>? initialPendingService;
@@ -1196,8 +1197,9 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'choose_service_type_page.dart';
 import '../../services/supabase_service.dart';
+import '../common/app_result_message.dart';
 
 class CustomerBookingCalendarPage extends StatefulWidget {
   final Function(Map<String, dynamic>) onBookingConfirmed;
@@ -470,6 +471,169 @@ class _CustomerBookingCalendarPageState
     await loadCalendarData();
   }
 
+  Future<void> showMonthPickerDialog() async {
+    int selectedMonth = currentMonth.month;
+    int selectedYear = currentMonth.year;
+
+    final now = DateTime.now();
+
+    final availableYears = List<int>.generate(
+      8,
+          (index) => now.year - 2 + index,
+    );
+
+    final pickedMonth = await showDialog<DateTime>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+              title: const Text(
+                'Choose Month',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: SizedBox(
+                width: 360,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<int>(
+                      value: selectedYear,
+                      decoration: InputDecoration(
+                        labelText: 'Year',
+                        prefixIcon: const Icon(
+                          Icons.calendar_today,
+                        ),
+                        filled: true,
+                        fillColor: const Color(0xFFF5F7FA),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      items: availableYears.map((year) {
+                        return DropdownMenuItem<int>(
+                          value: year,
+                          child: Text('$year'),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+
+                        setDialogState(() {
+                          selectedYear = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics:
+                      const NeverScrollableScrollPhysics(),
+                      itemCount: 12,
+                      gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
+                        childAspectRatio: 1.9,
+                      ),
+                      itemBuilder: (context, index) {
+                        final month = index + 1;
+                        final isSelectedMonth =
+                            selectedMonth == month;
+
+                        return InkWell(
+                          borderRadius:
+                          BorderRadius.circular(14),
+                          onTap: () {
+                            setDialogState(() {
+                              selectedMonth = month;
+                            });
+                          },
+                          child: AnimatedContainer(
+                            duration:
+                            const Duration(milliseconds: 180),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isSelectedMonth
+                                  ? const Color(0xFF339BFF)
+                                  : const Color(0xFFF5F7FA),
+                              borderRadius:
+                              BorderRadius.circular(14),
+                              border: Border.all(
+                                color: isSelectedMonth
+                                    ? const Color(0xFF339BFF)
+                                    : Colors.grey.shade300,
+                              ),
+                            ),
+                            child: Text(
+                              getMonthName(month)
+                                  .substring(0, 3)
+                                  .toUpperCase(),
+                              style: TextStyle(
+                                color: isSelectedMonth
+                                    ? Colors.white
+                                    : const Color(0xFF1F2937),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                  },
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                    const Color(0xFF339BFF),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    Navigator.pop(
+                      dialogContext,
+                      DateTime(
+                        selectedYear,
+                        selectedMonth,
+                        1,
+                      ),
+                    );
+                  },
+                  child: const Text('Open Month'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (pickedMonth == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      currentMonth = pickedMonth;
+      selectedDate = null;
+    });
+
+    await loadCalendarData();
+  }
+
   List<DateTime?> buildCalendarDays() {
     final firstDay = DateTime(currentMonth.year, currentMonth.month, 1);
     final lastDay = DateTime(currentMonth.year, currentMonth.month + 1, 0);
@@ -520,8 +684,9 @@ class _CustomerBookingCalendarPageState
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 
@@ -729,13 +894,39 @@ class _CustomerBookingCalendarPageState
                                 onTap: goPreviousMonth,
                               ),
                               Expanded(
-                                child: Text(
-                                  '${getMonthName(currentMonth.month)} '
-                                      '${currentMonth.year}',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 21,
-                                    fontWeight: FontWeight.bold,
+                                child: InkWell(
+                                  borderRadius:
+                                  BorderRadius.circular(14),
+                                  onTap: showMonthPickerDialog,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 10,
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                      MainAxisAlignment.center,
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            '${getMonthName(currentMonth.month).toUpperCase()} '
+                                                '${currentMonth.year}',
+                                            textAlign:
+                                            TextAlign.center,
+                                            style: const TextStyle(
+                                              fontSize: 20,
+                                              fontWeight:
+                                              FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        const Icon(
+                                          Icons.arrow_drop_down,
+                                          color: Color(0xFF339BFF),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),

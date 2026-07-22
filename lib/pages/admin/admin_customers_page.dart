@@ -3,10 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'vehicle_management_page.dart';
 import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
+import '../common/app_result_message.dart';
 
 class AdminCustomersPage extends StatefulWidget {
   const AdminCustomersPage({super.key});
@@ -418,6 +419,33 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
     return List<Map<String, dynamic>>.from(response);
   }
 
+  Future<List<Map<String, dynamic>>> fetchCustomerVehicles(
+      String customerId,
+      ) async {
+    final normalizedCustomerId =
+    customerId.trim();
+
+    if (normalizedCustomerId.isEmpty) {
+      return [];
+    }
+
+    final response = await supabase
+        .from('vehicles')
+        .select()
+        .eq(
+      'customer_id',
+      normalizedCustomerId,
+    )
+        .order(
+      'created_at',
+      ascending: false,
+    );
+
+    return List<Map<String, dynamic>>.from(
+      response,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> searchPendingVehicles(
       String plateKeyword,
       ) async {
@@ -520,12 +548,64 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
     }
   }
 
+  void openCustomerVehicle({
+    required BuildContext dialogContext,
+    required Map<String, dynamic> vehicle,
+  }) {
+    final vehicleId =
+    vehicle['vehicle_id']
+        ?.toString()
+        .trim();
+
+    final plateNumber =
+    vehicle['plate_number']
+        ?.toString()
+        .trim();
+
+    if (vehicleId == null ||
+        vehicleId.isEmpty) {
+      showMessage(
+        'Vehicle information is missing.',
+      );
+      return;
+    }
+
+    /*
+   * Close Customer Details first.
+   */
+    Navigator.pop(dialogContext);
+
+    /*
+   * Open Vehicle Management after the
+   * Customer Details dialog is closed.
+   */
+    WidgetsBinding.instance.addPostFrameCallback(
+          (_) {
+        if (!mounted) return;
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                VehicleManagementPage(
+                  initialVehicleId: vehicleId,
+                  initialPlateNumber:
+                  plateNumber,
+                ),
+          ),
+        );
+      },
+    );
+  }
+
   void showCustomerDetails(Map<String, dynamic> customer) {
     showDialog(
       context: context,
       builder: (context) {
         return FutureBuilder<List<Map<String, dynamic>>>(
-          future: fetchVerifiedVehicles(customer['customer_id'].toString()),
+          future: fetchCustomerVehicles(
+            customer['customer_id'].toString(),
+          ),
           builder: (context, snapshot) {
             final vehicles = snapshot.data ?? [];
 
@@ -567,7 +647,7 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
                       buildDetailBox('Phone', customer['phone'] ?? ''),
                       const SizedBox(height: 18),
                       const Text(
-                        'Verified Vehicles',
+                        'Customer Vehicles',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -585,14 +665,22 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
                             borderRadius: BorderRadius.circular(14),
                           ),
                           child: const Text(
-                            'No verified vehicles found.',
+                            'No vehicles assigned to this customer.',
                             style: TextStyle(color: Colors.black54),
                           ),
                         )
                       else
                         Column(
                           children: vehicles.map((vehicle) {
-                            return buildVehicleSmallCard(vehicle);
+                            return buildVehicleSmallCard(
+                              vehicle,
+                              onTap: () {
+                                openCustomerVehicle(
+                                  dialogContext: context,
+                                  vehicle: vehicle,
+                                );
+                              },
+                            );
                           }).toList(),
                         ),
                       const SizedBox(height: 18),
@@ -1131,33 +1219,157 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
     );
   }
 
-  Widget buildVehicleSmallCard(Map<String, dynamic> vehicle) {
+  Widget buildVehicleSmallCard(
+      Map<String, dynamic> vehicle, {
+        required VoidCallback onTap,
+      }) {
+    final status =
+        vehicle['verification_status']
+            ?.toString() ??
+            'Pending Claim';
+
+    Color statusColor;
+    IconData statusIcon;
+
+    if (status == 'Verified' ||
+        status == 'Link Record') {
+      statusColor = Colors.green;
+      statusIcon = Icons.verified;
+    } else if (status == 'Rejected') {
+      statusColor = Colors.red;
+      statusIcon = Icons.cancel;
+    } else {
+      statusColor = Colors.orange;
+      statusIcon = Icons.pending_actions;
+    }
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(
+        bottom: 10,
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFFF5F7FA),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius:
+        BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.grey.shade300,
+        ),
       ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.directions_car,
-            color: Color(0xFF339BFF),
+      child: InkWell(
+        borderRadius:
+        BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              const CircleAvatar(
+                backgroundColor:
+                Color(0xFFD7E5FA),
+                child: Icon(
+                  Icons.directions_car,
+                  color: Color(0xFF339BFF),
+                ),
+              ),
+
+              const SizedBox(width: 12),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      vehicle['plate_number']
+                          ?.toString() ??
+                          '',
+                      style: const TextStyle(
+                        fontWeight:
+                        FontWeight.bold,
+                        fontSize: 15,
+                        color:
+                        Color(0xFF1F2937),
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    Text(
+                      vehicle['car_model']
+                          ?.toString() ??
+                          '',
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontSize: 12,
+                      ),
+                    ),
+
+                    const SizedBox(height: 7),
+
+                    Container(
+                      padding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor
+                            .withOpacity(0.12),
+                        borderRadius:
+                        BorderRadius.circular(
+                          20,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize:
+                        MainAxisSize.min,
+                        children: [
+                          Icon(
+                            statusIcon,
+                            color: statusColor,
+                            size: 13,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            status,
+                            style: TextStyle(
+                              color: statusColor,
+                              fontWeight:
+                              FontWeight.bold,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(width: 10),
+
+              const Column(
+                children: [
+                  Icon(
+                    Icons.arrow_forward_ios,
+                    size: 16,
+                    color: Color(0xFF339BFF),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'View',
+                    style: TextStyle(
+                      color: Color(0xFF339BFF),
+                      fontSize: 10,
+                      fontWeight:
+                      FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '${vehicle['plate_number'] ?? ''} • ${vehicle['car_model'] ?? ''}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          const Icon(
-            Icons.verified,
-            color: Colors.green,
-            size: 18,
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1333,8 +1545,9 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
+import '../common/app_result_message.dart';
 
 class AdminServicesPage extends StatefulWidget {
   const AdminServicesPage({super.key});
@@ -436,8 +437,10 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
 
   void showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

@@ -8,6 +8,7 @@ import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 import '../../services/pdf_service.dart';
 import '../../services/customer_notification_service.dart';
+import '../common/app_result_message.dart';
 
 class AdminRecordsPage extends StatefulWidget {
   const AdminRecordsPage({super.key});
@@ -627,8 +628,9 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

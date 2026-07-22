@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/supabase_service.dart';
+import '../common/app_result_message.dart';
 
 class CustomerNotificationPage extends StatefulWidget {
   const CustomerNotificationPage({super.key});
@@ -760,8 +761,10 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
 
   void showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

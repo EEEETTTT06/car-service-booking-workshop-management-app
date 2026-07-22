@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../common/app_result_message.dart';
 
 
 class CustomerEditProfilePage extends StatefulWidget {
@@ -155,8 +156,9 @@ class _CustomerEditProfilePageState extends State<CustomerEditProfilePage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

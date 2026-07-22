@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
+import '../common/app_result_message.dart';
 
 class ChooseServiceTypePage extends StatefulWidget {
   final String selectedDate;
@@ -414,6 +415,28 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
       return;
     }
 
+    final now = DateTime.now();
+
+    final today = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
+    final appointmentDateOnly = DateTime(
+      appointmentDate.year,
+      appointmentDate.month,
+      appointmentDate.day,
+    );
+
+    if (!appointmentDateOnly.isAfter(today)) {
+      showMessage(
+        'Same-day booking is not available. '
+            'Please select tomorrow or a later date.',
+      );
+      return;
+    }
+
     final serviceIds = selectedServices
         .map(
           (service) =>
@@ -513,21 +536,13 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
       final navigator =
       Navigator.of(context);
 
-      final messenger =
-      ScaffoldMessenger.of(context);
-
-      navigator.pop();
-      navigator.pop();
-
-      messenger.hideCurrentSnackBar();
-
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Booking confirmed successfully.',
-          ),
-        ),
+      AppResultMessage.success(
+        context,
+        message: 'Booking confirmed successfully.',
       );
+
+      navigator.pop();
+      navigator.pop();
     } on PostgrestException catch (error) {
       /*
      * Display the clear message raised by the
@@ -895,8 +910,9 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

@@ -9,6 +9,7 @@ import 'pending_service_page.dart';
 import 'vehicle_management_page.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
+import '../common/app_result_message.dart';
 
 class AdminDashboardPage extends StatefulWidget {
   final Function(int) onNavigate;
@@ -398,8 +399,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

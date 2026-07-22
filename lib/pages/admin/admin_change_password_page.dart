@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/supabase_service.dart';
+import '../common/app_result_message.dart';
 
 class AdminChangePasswordPage extends StatefulWidget {
   const AdminChangePasswordPage({super.key});
@@ -52,14 +53,10 @@ class _AdminChangePasswordPageState
   void showMessage(String message, {bool error = false}) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        backgroundColor:
-        error ? Colors.red.shade600 : const Color(0xFF339BFF),
-        content: Text(message),
-      ),
+    AppResultMessage.show(
+      context,
+      message: message,
+      type: error ? AppResultType.error : AppResultMessage.inferType(message),
     );
   }
 

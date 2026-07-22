@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'change_new_password_page.dart';
 import '../../services/supabase_service.dart';
+import '../common/app_result_message.dart';
 
 class OtpVerificationPage extends StatefulWidget {
   final String email;
@@ -64,10 +65,9 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
       startCountdown();
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('OTP code has been resent.'),
-        ),
+      AppResultMessage.success(
+        context,
+        message: 'OTP code has been resent.',
       );
     } catch (error) {
       setState(() {

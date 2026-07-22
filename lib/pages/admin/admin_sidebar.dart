@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/login_page.dart';
 import 'admin_profile_page.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import '../common/app_result_message.dart';
 
 class AdminSidebar {
   static bool notificationOn = true;
@@ -598,17 +599,15 @@ class AdminSidebar {
                 ElevatedButton(
                   onPressed: () {
                     notificationOn = tempNotification;
-                    Navigator.pop(context);
 
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          notificationOn
-                              ? 'Notification turned on.'
-                              : 'Notification turned off.',
-                        ),
-                      ),
+                    AppResultMessage.success(
+                      context,
+                      message: notificationOn
+                          ? 'Notification turned on.'
+                          : 'Notification turned off.',
                     );
+
+                    Navigator.pop(context);
                   },
                   child: const Text('Save'),
                 ),

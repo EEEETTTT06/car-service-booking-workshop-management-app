@@ -5,6 +5,7 @@ import 'admin_change_password_page.dart';
 import '../auth/login_page.dart';
 import 'edit_admin_profile_page.dart';
 import 'workshop_profile_setting_page.dart';
+import '../common/app_result_message.dart';
 
 class AdminProfilePage extends StatefulWidget {
   const AdminProfilePage({super.key});
@@ -146,35 +147,10 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
   void showMessage(String message, {bool isError = false}) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        backgroundColor:
-        isError ? Colors.red.shade600 : const Color(0xFF339BFF),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        duration: const Duration(seconds: 2),
-        content: Row(
-          children: [
-            Icon(
-              isError ? Icons.error_outline : Icons.check_circle,
-              color: Colors.white,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                message,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    AppResultMessage.show(
+      context,
+      message: message,
+      type: isError ? AppResultType.error : AppResultMessage.inferType(message),
     );
   }
 

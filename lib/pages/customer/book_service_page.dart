@@ -1,10 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'customer_booking_calendar_page.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
-import 'dart:async';
-
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../common/app_result_message.dart';
 class BookServicePage extends StatefulWidget {
   const BookServicePage({super.key});
 
@@ -14,6 +16,7 @@ class BookServicePage extends StatefulWidget {
 
 class _BookServicePageState extends State<BookServicePage> {
   String selectedFilter = 'Upcoming';
+  String selectedSort = 'Near to Far';
   bool isLoading = false;
   bool isProcessingBooking = false;
   final ScrollController scrollController = ScrollController();
@@ -184,35 +187,43 @@ class _BookServicePageState extends State<BookServicePage> {
   }
 
   Future<void> updateExpiredBookings() async {
-    if (currentCustomer == null) return;
+    try {
+      final rpcResult = await supabase.rpc(
+        'customer_cancel_expired_bookings',
+      );
 
-    final now = DateTime.now();
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid expired booking result was returned.',
+        );
+      }
 
-    final todaySql = toSqlDate(
-      DateTime(
-        now.year,
-        now.month,
-        now.day,
-      ),
-    );
+      final result = Map<String, dynamic>.from(
+        rpcResult,
+      );
 
-    await supabase
-        .from('bookings')
-        .update({
-      'status': 'Cancelled',
-    })
-        .eq(
-      'customer_id',
-      currentCustomer!['customer_id'],
-    )
-        .eq(
-      'status',
-      'Booked',
-    )
-        .lt(
-      'appointment_date',
-      todaySql,
-    );
+      if (result['processed'] != true) {
+        throw Exception(
+          'Expired bookings were not processed correctly.',
+        );
+      }
+
+      final cancelledCount =
+          int.tryParse(
+            result['cancelled_count']
+                ?.toString() ??
+                '0',
+          ) ??
+              0;
+
+      if (cancelledCount > 0) {
+        debugPrint(
+          '$cancelledCount expired booking(s) changed to Cancelled.',
+        );
+      }
+    } on PostgrestException catch (error) {
+      throw Exception(error.message);
+    }
   }
 
   Future<List<Map<String, dynamic>>> fetchAllServices() async {
@@ -259,9 +270,25 @@ class _BookServicePageState extends State<BookServicePage> {
     return bookingOnly.isBefore(todayOnly);
   }
 
+  List<Map<String, dynamic>> normalizeRelatedRows(dynamic value) {
+    if (value == null) return [];
+
+    if (value is List) {
+      return value
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    }
+
+    if (value is Map) {
+      return [Map<String, dynamic>.from(value)];
+    }
+
+    return [];
+  }
+
   List<Map<String, dynamic>> getPendingServices(Map<String, dynamic> booking) {
-    final pending = booking['pending_services'] as List? ?? [];
-    return List<Map<String, dynamic>>.from(pending);
+    return normalizeRelatedRows(booking['pending_services']);
   }
 
   String? getServiceProgress(Map<String, dynamic> booking) {
@@ -313,20 +340,46 @@ class _BookServicePageState extends State<BookServicePage> {
       return getDisplayStatus(booking) == selectedFilter;
     }).toList();
 
-    if (selectedFilter == 'Upcoming') {
-      result.sort((a, b) {
-        final aDate = parseDate(a['appointment_date']);
-        final bDate = parseDate(b['appointment_date']);
+    result.sort((a, b) {
+      final aDate = parseDate(
+        a['appointment_date'].toString(),
+      );
 
-        final aToday = isTodayBooking(a['appointment_date']);
-        final bToday = isTodayBooking(b['appointment_date']);
+      final bDate = parseDate(
+        b['appointment_date'].toString(),
+      );
 
-        if (aToday && !bToday) return -1;
-        if (!aToday && bToday) return 1;
+      final now = DateTime.now();
 
-        return aDate.compareTo(bDate);
-      });
-    }
+      final today = DateTime(
+        now.year,
+        now.month,
+        now.day,
+      );
+
+      final aDistance = aDate
+          .difference(today)
+          .inDays
+          .abs();
+
+      final bDistance = bDate
+          .difference(today)
+          .inDays
+          .abs();
+
+      final distanceComparison =
+      aDistance.compareTo(bDistance);
+
+      if (distanceComparison != 0) {
+        return selectedSort == 'Near to Far'
+            ? distanceComparison
+            : -distanceComparison;
+      }
+
+      return selectedSort == 'Near to Far'
+          ? aDate.compareTo(bDate)
+          : bDate.compareTo(aDate);
+    });
 
     return result;
   }
@@ -338,12 +391,22 @@ class _BookServicePageState extends State<BookServicePage> {
   }
 
   List<Map<String, dynamic>> getServices(Map<String, dynamic> booking) {
-    final bookingServices = booking['booking_services'] as List? ?? [];
+    final bookingServices = normalizeRelatedRows(
+      booking['booking_services'],
+    );
 
-    return bookingServices.map<Map<String, dynamic>>((item) {
-      final service = item['services'] ?? {};
-      return Map<String, dynamic>.from(service);
-    }).toList();
+    return bookingServices
+        .map<Map<String, dynamic>?>((item) {
+          final service = item['services'];
+
+          if (service is Map) {
+            return Map<String, dynamic>.from(service);
+          }
+
+          return null;
+        })
+        .whereType<Map<String, dynamic>>()
+        .toList();
   }
 
   double getTotalPrice(Map<String, dynamic> booking) {
@@ -424,15 +487,8 @@ class _BookServicePageState extends State<BookServicePage> {
     return Icons.info;
   }
 
-  bool canModifyBooking(String appointmentDate, String status) {
-    if (status != 'Booked') return false;
-
-    final date = parseDate(appointmentDate);
-    final today = DateTime.now();
-    final todayOnly = DateTime(today.year, today.month, today.day);
-    final appointmentOnly = DateTime(date.year, date.month, date.day);
-
-    return appointmentOnly.difference(todayOnly).inDays >= 3;
+  bool canModifyBooking(String status) {
+    return status == 'Booked';
   }
 
   Future<void> notifyAdminsAboutCancelledBooking({
@@ -684,8 +740,31 @@ class _BookServicePageState extends State<BookServicePage> {
       return;
     }
 
-    final newSqlDate =
-    toSqlDate(newDate);
+    final now = DateTime.now();
+
+    final today = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
+    final newDateOnly = DateTime(
+      newDate.year,
+      newDate.month,
+      newDate.day,
+    );
+
+    if (!newDateOnly.isAfter(today)) {
+      showMessage(
+        'Same-day appointment updates are not available. '
+            'Please select tomorrow or a later date.',
+      );
+      return;
+    }
+
+    final newSqlDate = toSqlDate(
+      newDateOnly,
+    );
 
     if (mounted) {
       setState(() {
@@ -888,7 +967,7 @@ class _BookServicePageState extends State<BookServicePage> {
             ),
           ),
           actions: [
-            if (canModifyBooking(booking['appointment_date'], status))
+            if (canModifyBooking(status))
               TextButton(
                 onPressed: () {
                   Navigator.pop(context);
@@ -896,7 +975,7 @@ class _BookServicePageState extends State<BookServicePage> {
                 },
                 child: const Text('Edit Booking'),
               ),
-            if (canModifyBooking(booking['appointment_date'], status))
+            if (canModifyBooking(status))
               TextButton(
                 onPressed: () {
                   Navigator.pop(context);
@@ -999,23 +1078,39 @@ class _BookServicePageState extends State<BookServicePage> {
                             TextButton(
                               onPressed: () async {
                                 final now = DateTime.now();
-                                final minimumDate = DateTime(
+
+                                final today = DateTime(
                                   now.year,
                                   now.month,
                                   now.day,
-                                ).add(
-                                  const Duration(days: 3),
                                 );
+
+                                final minimumDate = today.add(
+                                  const Duration(days: 1),
+                                );
+
+                                final maximumDate = DateTime(
+                                  now.year + 1,
+                                  now.month,
+                                  now.day,
+                                );
+
+                                DateTime initialPickerDate =
+                                    selectedDate;
+
+                                if (selectedDate.isBefore(minimumDate)) {
+                                  initialPickerDate = minimumDate;
+                                } else if (
+                                selectedDate.isAfter(maximumDate)
+                                ) {
+                                  initialPickerDate = maximumDate;
+                                }
 
                                 final picked = await showDatePicker(
                                   context: context,
-                                  initialDate: selectedDate,
+                                  initialDate: initialPickerDate,
                                   firstDate: minimumDate,
-                                  lastDate: DateTime(
-                                    now.year + 1,
-                                    now.month,
-                                    now.day,
-                                  ),
+                                  lastDate: maximumDate,
                                 );
 
                                 if (picked != null) {
@@ -1347,6 +1442,95 @@ class _BookServicePageState extends State<BookServicePage> {
     );
   }
 
+  Widget buildSortControl() {
+    const sortOptions = <String>[
+      'Near to Far',
+      'Far to Near',
+    ];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.sort,
+            color: Color(0xFF339BFF),
+          ),
+
+          const SizedBox(width: 10),
+
+          const Text(
+            'Date Order',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1F2937),
+            ),
+          ),
+
+          const Spacer(),
+
+          DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: selectedSort,
+              borderRadius:
+              BorderRadius.circular(14),
+              icon: const Icon(
+                Icons.keyboard_arrow_down,
+                color: Color(0xFF339BFF),
+              ),
+              items: sortOptions.map((option) {
+                return DropdownMenuItem<String>(
+                  value: option,
+                  child: Text(
+                    option,
+                    style: const TextStyle(
+                      fontWeight:
+                      FontWeight.w600,
+                    ),
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                if (value == null ||
+                    value == selectedSort) {
+                  return;
+                }
+
+                setState(() {
+                  selectedSort = value;
+                });
+
+                if (scrollController.hasClients) {
+                  scrollController.animateTo(
+                    0,
+                    duration: const Duration(
+                      milliseconds: 350,
+                    ),
+                    curve: Curves.easeOut,
+                  );
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget buildSummaryCard({
     required IconData icon,
     required String title,
@@ -1611,8 +1795,9 @@ class _BookServicePageState extends State<BookServicePage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 
@@ -1737,6 +1922,19 @@ class _BookServicePageState extends State<BookServicePage> {
                     buildFilterButton('Cancelled'),
                   ],
                 ),
+              ),
+            ),
+
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 12),
+            ),
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+                child: buildSortControl(),
               ),
             ),
 

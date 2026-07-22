@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/supabase_service.dart';
+import '../common/app_result_message.dart';
 
 class AdminNotificationPage extends StatefulWidget {
   const AdminNotificationPage({super.key});
@@ -638,8 +639,10 @@ class _AdminNotificationPageState extends State<AdminNotificationPage> {
 
   void showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

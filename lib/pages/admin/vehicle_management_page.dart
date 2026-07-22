@@ -7,17 +7,33 @@ import 'admin_sidebar.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 import '../../services/customer_notification_service.dart';
+import '../common/app_result_message.dart';
 
 class VehicleManagementPage extends StatefulWidget {
-  const VehicleManagementPage({super.key});
+  final String? initialVehicleId;
+  final String? initialPlateNumber;
+
+  const VehicleManagementPage({
+    super.key,
+    this.initialVehicleId,
+    this.initialPlateNumber,
+  });
 
   @override
-  State<VehicleManagementPage> createState() => _VehicleManagementPageState();
+  State<VehicleManagementPage> createState() =>
+      _VehicleManagementPageState();
 }
 
-class _VehicleManagementPageState extends State<VehicleManagementPage> {
+class _VehicleManagementPageState
+    extends State<VehicleManagementPage> {
   String searchText = '';
   bool isLoading = false;
+
+  final TextEditingController
+  searchController =
+  TextEditingController();
+
+  bool hasHandledInitialVehicle = false;
 
   final ScrollController scrollController = ScrollController();
   bool showBackToTop = false;
@@ -29,6 +45,18 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
   @override
   void initState() {
     super.initState();
+
+    final initialPlate =
+        widget.initialPlateNumber
+            ?.trim() ??
+            '';
+
+    if (initialPlate.isNotEmpty) {
+      searchController.text =
+          initialPlate;
+
+      searchText = initialPlate;
+    }
 
     fetchVehicles();
     setupRealtimeSubscription();
@@ -52,6 +80,7 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
       );
     }
 
+    searchController.dispose();
     scrollController.dispose();
     super.dispose();
   }
@@ -85,10 +114,13 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
       if (!mounted) return;
 
       setState(() {
-        vehicles = List<Map<String, dynamic>>.from(
+        vehicles =
+        List<Map<String, dynamic>>.from(
           response,
         );
       });
+
+      tryOpenInitialVehicle();
     } catch (error) {
       if (showLoading) {
         showMessage(
@@ -106,6 +138,100 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
         });
       }
     }
+  }
+
+  void tryOpenInitialVehicle() {
+    if (hasHandledInitialVehicle) {
+      return;
+    }
+
+    final initialVehicleId =
+        widget.initialVehicleId
+            ?.trim() ??
+            '';
+
+    final initialPlateNumber =
+        widget.initialPlateNumber
+            ?.trim()
+            .toUpperCase() ??
+            '';
+
+    if (initialVehicleId.isEmpty &&
+        initialPlateNumber.isEmpty) {
+      hasHandledInitialVehicle = true;
+      return;
+    }
+
+    Map<String, dynamic>? targetVehicle;
+
+    /*
+   * First use vehicle_id because it is unique
+   * and will not be affected if the plate is
+   * changed later.
+   */
+    if (initialVehicleId.isNotEmpty) {
+      for (final vehicle in vehicles) {
+        final vehicleId =
+        vehicle['vehicle_id']
+            ?.toString()
+            .trim();
+
+        if (vehicleId ==
+            initialVehicleId) {
+          targetVehicle = vehicle;
+          break;
+        }
+      }
+    }
+
+    /*
+   * Use the plate number only as a backup.
+   */
+    if (targetVehicle == null &&
+        initialPlateNumber.isNotEmpty) {
+      for (final vehicle in vehicles) {
+        final plateNumber =
+        vehicle['plate_number']
+            ?.toString()
+            .trim()
+            .toUpperCase();
+
+        if (plateNumber ==
+            initialPlateNumber) {
+          targetVehicle = vehicle;
+          break;
+        }
+      }
+    }
+
+    hasHandledInitialVehicle = true;
+
+    if (targetVehicle == null) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        showMessage(
+          'The selected vehicle could not be found.',
+        );
+      });
+
+      return;
+    }
+
+    final vehicleToOpen =
+    Map<String, dynamic>.from(
+      targetVehicle,
+    );
+
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      showVehicleDetailDialog(
+        vehicleToOpen,
+      );
+    });
   }
 
   void setupRealtimeSubscription() {
@@ -1122,21 +1248,453 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
     );
   }
 
-  void showVehicleDetailDialog(Map<String, dynamic> vehicle) {
-    final status = vehicle['verification_status'] ?? 'Verified';
-    final vehicleId = vehicle['vehicle_id'].toString();
-    final plate = vehicle['plate_number'] ?? '';
-    final model = vehicle['car_model'] ?? '';
-    final owner = (vehicle['customer_name'] ?? '').toString().isEmpty
+  Future<List<Map<String, dynamic>>> fetchVehicleImages(
+      String vehicleId,
+      ) async {
+    final response = await supabase
+        .from('vehicle_images')
+        .select(
+      'image_id, vehicle_id, image_type, storage_path, created_at',
+    )
+        .eq('vehicle_id', vehicleId)
+        .order('created_at', ascending: true);
+
+    final rows =
+    List<Map<String, dynamic>>.from(response);
+
+    final result =
+    <Map<String, dynamic>>[];
+
+    for (final row in rows) {
+      final image =
+      Map<String, dynamic>.from(row);
+
+      final storagePath = image['storage_path']
+          ?.toString()
+          .trim();
+
+      if (storagePath == null ||
+          storagePath.isEmpty) {
+        image['signed_url'] = null;
+        result.add(image);
+        continue;
+      }
+
+      try {
+        /*
+       * The bucket is private, so Admin receives
+       * a temporary URL valid for one hour.
+       */
+        final signedUrl = await supabase.storage
+            .from('vehicle-photos')
+            .createSignedUrl(
+          storagePath,
+          3600,
+        );
+
+        image['signed_url'] = signedUrl;
+      } catch (error) {
+        debugPrint(
+          'Failed to create vehicle photo URL: '
+              '$error',
+        );
+
+        image['signed_url'] = null;
+        image['load_error'] = error.toString();
+      }
+
+      result.add(image);
+    }
+
+    return result;
+  }
+
+  void showVehicleImagePreview({
+    required String imageUrl,
+    required String title,
+  }) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 28,
+          ),
+          backgroundColor: Colors.black,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            height:
+            MediaQuery.of(dialogContext)
+                .size
+                .height *
+                0.75,
+            child: Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(
+                    16,
+                    10,
+                    8,
+                    10,
+                  ),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1F2937),
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(20),
+                      topRight: Radius.circular(20),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight:
+                            FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () {
+                          Navigator.pop(
+                            dialogContext,
+                          );
+                        },
+                        icon: const Icon(
+                          Icons.close,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: InteractiveViewer(
+                    minScale: 0.8,
+                    maxScale: 5,
+                    child: Center(
+                      child: Image.network(
+                        imageUrl,
+                        fit: BoxFit.contain,
+                        loadingBuilder: (
+                            context,
+                            child,
+                            loadingProgress,
+                            ) {
+                          if (loadingProgress ==
+                              null) {
+                            return child;
+                          }
+
+                          return const Center(
+                            child:
+                            CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                          );
+                        },
+                        errorBuilder: (
+                            context,
+                            error,
+                            stackTrace,
+                            ) {
+                          return const Column(
+                            mainAxisAlignment:
+                            MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.broken_image,
+                                color: Colors.white54,
+                                size: 56,
+                              ),
+                              SizedBox(height: 10),
+                              Text(
+                                'Unable to display this photo.',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget buildVehiclePhotoSection({
+    required String title,
+    required IconData icon,
+    required List<Map<String, dynamic>> images,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F7FA),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.grey.shade300,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                icon,
+                color: const Color(0xFF339BFF),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 9,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color:
+                  const Color(0xFFD7E5FA),
+                  borderRadius:
+                  BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${images.length}',
+                  style: const TextStyle(
+                    color: Color(0xFF339BFF),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (images.isEmpty)
+            const Row(
+              children: [
+                Icon(
+                  Icons.image_not_supported_outlined,
+                  color: Colors.black38,
+                  size: 20,
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'No photos uploaded.',
+                    style: TextStyle(
+                      color: Colors.black54,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            )
+          else
+            SizedBox(
+              height: 100,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: images.length,
+                separatorBuilder: (
+                    context,
+                    index,
+                    ) {
+                  return const SizedBox(width: 10);
+                },
+                itemBuilder: (context, index) {
+                  final image = images[index];
+
+                  final signedUrl =
+                  image['signed_url']
+                      ?.toString()
+                      .trim();
+
+                  final canOpen =
+                      signedUrl != null &&
+                          signedUrl.isNotEmpty;
+
+                  return InkWell(
+                    borderRadius:
+                    BorderRadius.circular(12),
+                    onTap: canOpen
+                        ? () {
+                      showVehicleImagePreview(
+                        imageUrl: signedUrl,
+                        title:
+                        '$title ${index + 1}',
+                      );
+                    }
+                        : null,
+                    child: Container(
+                      width: 105,
+                      height: 95,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius:
+                        BorderRadius.circular(12),
+                        border: Border.all(
+                          color:
+                          Colors.grey.shade300,
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius:
+                        BorderRadius.circular(11),
+                        child: canOpen
+                            ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.network(
+                              signedUrl,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (
+                                  context,
+                                  child,
+                                  loadingProgress,
+                                  ) {
+                                if (loadingProgress ==
+                                    null) {
+                                  return child;
+                                }
+
+                                return const Center(
+                                  child:
+                                  CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                );
+                              },
+                              errorBuilder: (
+                                  context,
+                                  error,
+                                  stackTrace,
+                                  ) {
+                                return const Icon(
+                                  Icons
+                                      .broken_image_outlined,
+                                  color:
+                                  Colors.black38,
+                                  size: 34,
+                                );
+                              },
+                            ),
+                            Positioned(
+                              right: 5,
+                              bottom: 5,
+                              child: Container(
+                                padding:
+                                const EdgeInsets
+                                    .all(4),
+                                decoration:
+                                BoxDecoration(
+                                  color: Colors.black
+                                      .withOpacity(
+                                    0.55,
+                                  ),
+                                  shape:
+                                  BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.zoom_in,
+                                  color:
+                                  Colors.white,
+                                  size: 16,
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                            : const Center(
+                          child: Icon(
+                            Icons
+                                .broken_image_outlined,
+                            color:
+                            Colors.black38,
+                            size: 34,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void showVehicleDetailDialog(
+      Map<String, dynamic> vehicle,
+      ) {
+    final status =
+        vehicle['verification_status'] ??
+            'Verified';
+
+    final vehicleId =
+    vehicle['vehicle_id'].toString();
+
+    final plate =
+        vehicle['plate_number'] ?? '';
+
+    final model =
+        vehicle['car_model'] ?? '';
+
+    final owner =
+    (vehicle['customer_name'] ?? '')
+        .toString()
+        .isEmpty
         ? 'No Customer Assigned'
-        : vehicle['customer_name'];
+        : vehicle['customer_name']
+        .toString();
+
+    /*
+   * Every time Admin opens the Vehicle Details,
+   * the latest Customer photos will be loaded.
+   */
+    final imagesFuture =
+    fetchVehicleImages(vehicleId);
 
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 30),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          insetPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 30,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius:
+            BorderRadius.circular(28),
+          ),
           child: SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.all(22),
@@ -1145,72 +1703,275 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
                 children: [
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(20),
+                    padding:
+                    const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF339BFF), Color(0xFF63B3FF)],
+                      gradient:
+                      const LinearGradient(
+                        colors: [
+                          Color(0xFF339BFF),
+                          Color(0xFF63B3FF),
+                        ],
                       ),
-                      borderRadius: BorderRadius.circular(24),
+                      borderRadius:
+                      BorderRadius.circular(24),
                     ),
                     child: Column(
                       children: [
-                        const Icon(Icons.directions_car, color: Colors.white, size: 44),
+                        const Icon(
+                          Icons.directions_car,
+                          color: Colors.white,
+                          size: 44,
+                        ),
                         const SizedBox(height: 10),
                         Text(
-                          plate,
+                          plate.toString(),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 23,
-                            fontWeight: FontWeight.bold,
+                            fontWeight:
+                            FontWeight.bold,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          model,
-                          style: const TextStyle(color: Colors.white70),
+                          model.toString(),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 18),
-
-                  buildDetailRow('Plate Number', plate),
-                  buildDetailRow('Car Model', model),
-                  buildDetailRow('Customer Name', owner),
-                  buildDetailRow('Status', status),
 
                   const SizedBox(height: 18),
 
-                  if (status == 'Pending Claim') ...[
+                  buildDetailRow(
+                    'Plate Number',
+                    plate.toString(),
+                  ),
+
+                  buildDetailRow(
+                    'Car Model',
+                    model.toString(),
+                  ),
+
+                  buildDetailRow(
+                    'Customer Name',
+                    owner,
+                  ),
+
+                  buildDetailRow(
+                    'Status',
+                    status.toString(),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  const Divider(),
+
+                  const SizedBox(height: 8),
+
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Customer Uploaded Photos',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
+                        color: Color(0xFF1F2937),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 5),
+
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Review the VOC and vehicle photos before processing the claim.',
+                      style: TextStyle(
+                        color: Colors.black54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  FutureBuilder<
+                      List<Map<String, dynamic>>>(
+                    future: imagesFuture,
+                    builder: (
+                        context,
+                        snapshot,
+                        ) {
+                      if (snapshot.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Padding(
+                          padding:
+                          EdgeInsets.symmetric(
+                            vertical: 25,
+                          ),
+                          child:
+                          CircularProgressIndicator(),
+                        );
+                      }
+
+                      if (snapshot.hasError) {
+                        return Container(
+                          width: double.infinity,
+                          padding:
+                          const EdgeInsets.all(
+                            14,
+                          ),
+                          decoration: BoxDecoration(
+                            color:
+                            Colors.red.shade50,
+                            borderRadius:
+                            BorderRadius.circular(
+                              14,
+                            ),
+                            border: Border.all(
+                              color: Colors.red
+                                  .withOpacity(0.35),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+                            children: [
+                              const Icon(
+                                Icons.error_outline,
+                                color: Colors.red,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Unable to load vehicle photos: '
+                                      '${snapshot.error}',
+                                  style:
+                                  const TextStyle(
+                                    color: Colors.red,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      final allImages =
+                          snapshot.data ?? [];
+
+                      final vocImages = allImages
+                          .where(
+                            (image) =>
+                        image['image_type']
+                            ?.toString() ==
+                            'voc',
+                      )
+                          .toList();
+
+                      final vehiclePhotos =
+                      allImages
+                          .where(
+                            (image) =>
+                        image['image_type']
+                            ?.toString() ==
+                            'vehicle',
+                      )
+                          .toList();
+
+                      return Column(
+                        children: [
+                          buildVehiclePhotoSection(
+                            title: 'VOC Photos',
+                            icon:
+                            Icons.description,
+                            images: vocImages,
+                          ),
+
+                          const SizedBox(
+                            height: 12,
+                          ),
+
+                          buildVehiclePhotoSection(
+                            title:
+                            'Vehicle Photos',
+                            icon:
+                            Icons.directions_car,
+                            images:
+                            vehiclePhotos,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  if (status ==
+                      'Pending Claim') ...[
                     Row(
                       children: [
                         Expanded(
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
+                          child:
+                          ElevatedButton.icon(
+                            style:
+                            ElevatedButton
+                                .styleFrom(
+                              backgroundColor:
+                              Colors.green,
+                              foregroundColor:
+                              Colors.white,
                             ),
                             onPressed: () {
-                              Navigator.pop(context);
-                              showApproveClaimDialog(vehicle);
+                              Navigator.pop(
+                                dialogContext,
+                              );
+
+                              showApproveClaimDialog(
+                                vehicle,
+                              );
                             },
-                            icon: const Icon(Icons.check),
-                            label: const Text('Approve'),
+                            icon: const Icon(
+                              Icons.check,
+                            ),
+                            label: const Text(
+                              'Approve',
+                            ),
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              foregroundColor: Colors.white,
+                          child:
+                          ElevatedButton.icon(
+                            style:
+                            ElevatedButton
+                                .styleFrom(
+                              backgroundColor:
+                              Colors.red,
+                              foregroundColor:
+                              Colors.white,
                             ),
                             onPressed: () {
-                              Navigator.pop(context);
-                              showRejectClaimDialog(vehicle);
+                              Navigator.pop(
+                                dialogContext,
+                              );
+
+                              showRejectClaimDialog(
+                                vehicle,
+                              );
                             },
-                            icon: const Icon(Icons.close),
-                            label: const Text('Reject'),
+                            icon: const Icon(
+                              Icons.close,
+                            ),
+                            label: const Text(
+                              'Reject',
+                            ),
                           ),
                         ),
                       ],
@@ -1218,35 +1979,62 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
                     const SizedBox(height: 10),
                   ],
 
-                  if (status == 'Verified') ...[
+                  if (status ==
+                      'Verified') ...[
                     SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
+                      child:
+                      OutlinedButton.icon(
                         onPressed: () {
-                          Navigator.pop(context);
-                          showUnclaimDialog(vehicle);
+                          Navigator.pop(
+                            dialogContext,
+                          );
+
+                          showUnclaimDialog(
+                            vehicle,
+                          );
                         },
-                        icon: const Icon(Icons.link_off),
-                        label: const Text('Set as Unclaim'),
+                        icon: const Icon(
+                          Icons.link_off,
+                        ),
+                        label: const Text(
+                          'Set as Unclaim',
+                        ),
                       ),
                     ),
                     const SizedBox(height: 10),
                   ],
 
-                  if (status != 'Pending Claim') ...[
+                  if (status !=
+                      'Pending Claim') ...[
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF339BFF),
-                          foregroundColor: Colors.white,
+                      child:
+                      ElevatedButton.icon(
+                        style:
+                        ElevatedButton.styleFrom(
+                          backgroundColor:
+                          const Color(
+                            0xFF339BFF,
+                          ),
+                          foregroundColor:
+                          Colors.white,
                         ),
                         onPressed: () {
-                          Navigator.pop(context);
-                          showEditVehicleDialog(vehicle);
+                          Navigator.pop(
+                            dialogContext,
+                          );
+
+                          showEditVehicleDialog(
+                            vehicle,
+                          );
                         },
-                        icon: const Icon(Icons.edit),
-                        label: const Text('Edit Vehicle'),
+                        icon: const Icon(
+                          Icons.edit,
+                        ),
+                        label: const Text(
+                          'Edit Vehicle',
+                        ),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -1256,23 +2044,42 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
                     children: [
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Close'),
+                          onPressed: () {
+                            Navigator.pop(
+                              dialogContext,
+                            );
+                          },
+                          child:
+                          const Text('Close'),
                         ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
+                        child:
+                        OutlinedButton.icon(
+                          style: OutlinedButton
+                              .styleFrom(
+                            foregroundColor:
+                            Colors.red,
+                            side:
+                            const BorderSide(
+                              color: Colors.red,
+                            ),
                           ),
                           onPressed: () {
-                            Navigator.pop(context);
-                            showDeleteVehicleDialog(vehicleId);
+                            Navigator.pop(
+                              dialogContext,
+                            );
+
+                            showDeleteVehicleDialog(
+                              vehicleId,
+                            );
                           },
-                          icon: const Icon(Icons.delete_outline),
-                          label: const Text('Delete'),
+                          icon: const Icon(
+                            Icons.delete_outline,
+                          ),
+                          label:
+                          const Text('Delete'),
                         ),
                       ),
                     ],
@@ -1656,8 +2463,9 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 
@@ -1753,6 +2561,7 @@ class _VehicleManagementPageState extends State<VehicleManagementPage> {
                     ),
                     const SizedBox(height: 16),
                     TextField(
+                      controller: searchController,
                       onChanged: (value) {
                         setState(() {
                           searchText = value;

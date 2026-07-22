@@ -5,6 +5,7 @@ import '../auth/login_page.dart';
 import '../common/notification_bell.dart';
 import 'customer_edit_profile_page.dart';
 import 'customer_settings_page.dart';
+import '../common/app_result_message.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -209,22 +210,9 @@ class _ProfilePageState extends State<ProfilePage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        backgroundColor: const Color(0xFF339BFF),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        content: Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

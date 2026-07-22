@@ -7,6 +7,7 @@ import 'admin_appointment_calendar_page.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 import '../../services/customer_notification_service.dart';
+import '../common/app_result_message.dart';
 
 class AdminBookingsPage extends StatefulWidget {
   const AdminBookingsPage({super.key});
@@ -20,6 +21,7 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
   String selectedSort = 'Nearest';
   String searchText = '';
   bool isLoading = false;
+  bool isProcessingDecision = false;
 
   List<Map<String, dynamic>> bookings = [];
   final ScrollController scrollController = ScrollController();
@@ -478,26 +480,106 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
     await markCustomerArrived(booking);
   }
 
-  Future<void> approveAppointment(Map<String, dynamic> booking) async {
+  Future<void> approveAppointment(
+      Map<String, dynamic> booking,
+      ) async {
+    if (isProcessingDecision) return;
+
+    final bookingId =
+    booking['booking_id']?.toString().trim();
+
+    if (bookingId == null || bookingId.isEmpty) {
+      showMessage('Booking information is missing.');
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        isProcessingDecision = true;
+      });
+    }
+
     try {
-      final date = formatDate(booking['appointment_date'].toString());
-      final plate = booking['vehicles']?['plate_number'] ?? 'your vehicle';
-
-      await supabase.from('bookings').update({
-        'status': 'Approved',
-        'rejection_reason': null,
-      }).eq('booking_id', booking['booking_id']);
-
-      await createBookingNotification(
-        booking: booking,
-        title: 'Appointment Approved',
-        message: 'Your appointment for $plate on $date has been approved.',
+      final rpcResult = await supabase.rpc(
+        'admin_decide_booking',
+        params: {
+          'p_booking_id': bookingId,
+          'p_decision': 'approve',
+          'p_rejection_reason': null,
+        },
       );
 
-      await fetchBookings();
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid booking decision result was returned.',
+        );
+      }
+
+      final result = Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['updated'] != true ||
+          result['status'] != 'Approved') {
+        throw Exception(
+          'The appointment was not approved correctly.',
+        );
+      }
+
+      final customerId =
+      result['customer_id']?.toString().trim();
+
+      final title =
+          result['title']?.toString() ??
+              'Appointment Approved';
+
+      final message =
+          result['message']?.toString() ??
+              'Your appointment has been approved.';
+
+      if (customerId != null && customerId.isNotEmpty) {
+        try {
+          await sendFcmPushNotification(
+            customerId: customerId,
+            title: title,
+            message: message,
+            data: {
+              'notification_type': 'booking',
+              'target_page': 'my_bookings',
+              'booking_id': result['booking_id'] ?? bookingId,
+              'vehicle_id':
+              result['vehicle_id'] ?? booking['vehicle_id'],
+            },
+          );
+        } catch (notificationError, stackTrace) {
+          debugPrint(
+            'Appointment approval push failed: '
+                '$notificationError',
+          );
+          debugPrint(stackTrace.toString());
+        }
+      }
+
+      await fetchBookings(showLoading: false);
       showMessage('Appointment approved.');
-    } catch (error) {
-      showMessage('Failed to approve appointment: $error');
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await fetchBookings(showLoading: false);
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin approve appointment failed: $error',
+      );
+      debugPrint(stackTrace.toString());
+
+      showMessage(
+        'Failed to approve appointment: $error',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isProcessingDecision = false;
+        });
+      }
     }
   }
 
@@ -505,42 +587,110 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
     required Map<String, dynamic> booking,
     required String reason,
   }) async {
+    if (isProcessingDecision) return;
+
+    final bookingId =
+    booking['booking_id']?.toString().trim();
+
+    final normalizedReason = reason.trim();
+
+    if (bookingId == null || bookingId.isEmpty) {
+      showMessage('Booking information is missing.');
+      return;
+    }
+
+    if (normalizedReason.isEmpty) {
+      showMessage('Please enter rejection reason.');
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        isProcessingDecision = true;
+      });
+    }
+
     try {
-      final date = formatDate(booking['appointment_date'].toString());
-      final plate = booking['vehicles']?['plate_number'] ?? 'your vehicle';
-
-      await supabase.from('bookings').update({
-        'status': 'Rejected',
-        'rejection_reason': reason,
-      }).eq('booking_id', booking['booking_id']);
-
-      await createBookingNotification(
-        booking: booking,
-        title: 'Appointment Rejected',
-        message:
-        'Your appointment for $plate on $date has been rejected. Reason: $reason',
+      final rpcResult = await supabase.rpc(
+        'admin_decide_booking',
+        params: {
+          'p_booking_id': bookingId,
+          'p_decision': 'reject',
+          'p_rejection_reason': normalizedReason,
+        },
       );
 
-      await fetchBookings();
+      if (rpcResult is! Map) {
+        throw Exception(
+          'Invalid booking decision result was returned.',
+        );
+      }
+
+      final result = Map<String, dynamic>.from(
+        rpcResult,
+      );
+
+      if (result['updated'] != true ||
+          result['status'] != 'Rejected') {
+        throw Exception(
+          'The appointment was not rejected correctly.',
+        );
+      }
+
+      final customerId =
+      result['customer_id']?.toString().trim();
+
+      final title =
+          result['title']?.toString() ??
+              'Appointment Rejected';
+
+      final message =
+          result['message']?.toString() ??
+              'Your appointment has been rejected.';
+
+      if (customerId != null && customerId.isNotEmpty) {
+        try {
+          await sendFcmPushNotification(
+            customerId: customerId,
+            title: title,
+            message: message,
+            data: {
+              'notification_type': 'booking',
+              'target_page': 'my_bookings',
+              'booking_id': result['booking_id'] ?? bookingId,
+              'vehicle_id':
+              result['vehicle_id'] ?? booking['vehicle_id'],
+            },
+          );
+        } catch (notificationError, stackTrace) {
+          debugPrint(
+            'Appointment rejection push failed: '
+                '$notificationError',
+          );
+          debugPrint(stackTrace.toString());
+        }
+      }
+
+      await fetchBookings(showLoading: false);
       showMessage('Appointment rejected.');
-    } catch (error) {
-      showMessage('Failed to reject appointment: $error');
-    }
-  }
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
+      await fetchBookings(showLoading: false);
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Admin reject appointment failed: $error',
+      );
+      debugPrint(stackTrace.toString());
 
-  Future<void> updateBookingStatus({
-    required Map<String, dynamic> booking,
-    required String status,
-  }) async {
-    try {
-      await supabase.from('bookings').update({
-        'status': status,
-      }).eq('booking_id', booking['booking_id']);
-
-      await fetchBookings();
-      showMessage('Booking status updated.');
-    } catch (error) {
-      showMessage('Failed to update status: $error');
+      showMessage(
+        'Failed to reject appointment: $error',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isProcessingDecision = false;
+        });
+      }
     }
   }
 
@@ -1365,8 +1515,9 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

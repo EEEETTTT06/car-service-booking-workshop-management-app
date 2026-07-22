@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'book_service_page.dart';
 import 'service_records_page.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
+import '../common/app_result_message.dart';
 
 class MyVehiclesPage extends StatefulWidget {
   const MyVehiclesPage({super.key});
@@ -17,6 +20,8 @@ class MyVehiclesPage extends StatefulWidget {
 
 class _MyVehiclesPageState extends State<MyVehiclesPage> {
   bool isLoading = false;
+
+  final ImagePicker imagePicker = ImagePicker();
 
   final ScrollController scrollController = ScrollController();
   bool showBackToTop = false;
@@ -305,6 +310,491 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
       ),
     );
   }
+
+  Future<void> pickVehiclePhotos({
+    required ImageSource source,
+    required List<XFile> targetPhotos,
+    required StateSetter setDialogState,
+  }) async {
+    try {
+      if (source == ImageSource.camera) {
+        final photo = await imagePicker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 85,
+          maxWidth: 1800,
+        );
+
+        if (photo == null) return;
+
+        setDialogState(() {
+          targetPhotos.add(photo);
+        });
+
+        return;
+      }
+
+      final selectedPhotos =
+      await imagePicker.pickMultiImage(
+        imageQuality: 85,
+        maxWidth: 1800,
+      );
+
+      if (selectedPhotos.isEmpty) return;
+
+      setDialogState(() {
+        final existingPaths = targetPhotos
+            .map((photo) => photo.path)
+            .toSet();
+
+        for (final photo in selectedPhotos) {
+          if (existingPaths.add(photo.path)) {
+            targetPhotos.add(photo);
+          }
+        }
+      });
+    } catch (error) {
+      showMessage(
+        'Unable to select photos: $error',
+      );
+    }
+  }
+
+  String getVehiclePhotoExtension(
+      XFile photo,
+      ) {
+    final mimeType =
+    photo.mimeType?.toLowerCase();
+
+    if (mimeType == 'image/jpeg') {
+      return 'jpg';
+    }
+
+    if (mimeType == 'image/png') {
+      return 'png';
+    }
+
+    if (mimeType == 'image/webp') {
+      return 'webp';
+    }
+
+    final fileName = photo.name.toLowerCase();
+    final dotIndex = fileName.lastIndexOf('.');
+
+    if (dotIndex >= 0 &&
+        dotIndex < fileName.length - 1) {
+      final extension = fileName
+          .substring(dotIndex + 1)
+          .toLowerCase();
+
+      if (extension == 'jpg' ||
+          extension == 'jpeg') {
+        return 'jpg';
+      }
+
+      if (extension == 'png') {
+        return 'png';
+      }
+
+      if (extension == 'webp') {
+        return 'webp';
+      }
+    }
+
+    throw Exception(
+      '${photo.name}: only JPG, PNG or WEBP images are supported.',
+    );
+  }
+
+  String getVehiclePhotoContentType(
+      String extension,
+      ) {
+    if (extension == 'png') {
+      return 'image/png';
+    }
+
+    if (extension == 'webp') {
+      return 'image/webp';
+    }
+
+    return 'image/jpeg';
+  }
+
+  Future<Map<String, int>> uploadVehiclePhotos({
+    required String vehicleId,
+    required List<XFile> vocPhotos,
+    required List<XFile> vehiclePhotos,
+  }) async {
+    final totalPhotoCount =
+        vocPhotos.length + vehiclePhotos.length;
+
+    final customerId = currentCustomer?['customer_id']
+        ?.toString()
+        .trim();
+
+    if (customerId == null ||
+        customerId.isEmpty) {
+      return {
+        'uploaded': 0,
+        'failed': totalPhotoCount,
+      };
+    }
+
+    int uploadedCount = 0;
+    int failedCount = 0;
+
+    Future<void> uploadPhotoGroup({
+      required List<XFile> photos,
+      required String imageType,
+    }) async {
+      for (
+      int index = 0;
+      index < photos.length;
+      index++
+      ) {
+        final photo = photos[index];
+        String? storagePath;
+
+        try {
+          final fileSize = await photo.length();
+
+          if (fileSize > 10 * 1024 * 1024) {
+            throw Exception(
+              '${photo.name} is larger than 10 MB.',
+            );
+          }
+
+          final extension =
+          getVehiclePhotoExtension(photo);
+
+          final contentType =
+          getVehiclePhotoContentType(
+            extension,
+          );
+
+          final bytes = await photo.readAsBytes();
+
+          final timestamp = DateTime.now()
+              .microsecondsSinceEpoch;
+
+          storagePath =
+          '$customerId/'
+              '$vehicleId/'
+              '$imageType/'
+              '${timestamp}_$index.$extension';
+
+          await supabase.storage
+              .from('vehicle-photos')
+              .uploadBinary(
+            storagePath,
+            bytes,
+            fileOptions: FileOptions(
+              cacheControl: '3600',
+              upsert: false,
+              contentType: contentType,
+            ),
+          );
+
+          await supabase
+              .from('vehicle_images')
+              .insert({
+            'vehicle_id': vehicleId,
+            'customer_id': customerId,
+            'image_type': imageType,
+            'storage_path': storagePath,
+          });
+
+          uploadedCount++;
+        } catch (error, stackTrace) {
+          failedCount++;
+
+          debugPrint(
+            'Vehicle photo upload failed: $error',
+          );
+
+          debugPrint(
+            stackTrace.toString(),
+          );
+
+          /*
+         * If Storage upload succeeded but the
+         * vehicle_images insert failed, remove
+         * the uploaded Storage file.
+         */
+          if (storagePath != null) {
+            try {
+              await supabase.storage
+                  .from('vehicle-photos')
+                  .remove([storagePath]);
+            } catch (cleanupError) {
+              debugPrint(
+                'Vehicle photo cleanup failed: '
+                    '$cleanupError',
+              );
+            }
+          }
+        }
+      }
+    }
+
+    await uploadPhotoGroup(
+      photos: vocPhotos,
+      imageType: 'voc',
+    );
+
+    await uploadPhotoGroup(
+      photos: vehiclePhotos,
+      imageType: 'vehicle',
+    );
+
+    return {
+      'uploaded': uploadedCount,
+      'failed': failedCount,
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> fetchVehicleImages(
+      String vehicleId,
+      ) async {
+    final response = await supabase
+        .from('vehicle_images')
+        .select(
+      'image_id, vehicle_id, customer_id, image_type, storage_path, created_at',
+    )
+        .eq('vehicle_id', vehicleId)
+        .order('created_at', ascending: true);
+
+    final rows =
+    List<Map<String, dynamic>>.from(response);
+
+    final images = <Map<String, dynamic>>[];
+
+    for (final row in rows) {
+      final image =
+      Map<String, dynamic>.from(row);
+
+      final storagePath =
+      image['storage_path']
+          ?.toString()
+          .trim();
+
+      if (storagePath == null ||
+          storagePath.isEmpty) {
+        image['signed_url'] = null;
+        images.add(image);
+        continue;
+      }
+
+      try {
+        final signedUrl = await supabase.storage
+            .from('vehicle-photos')
+            .createSignedUrl(
+          storagePath,
+          3600,
+        );
+
+        image['signed_url'] = signedUrl;
+      } catch (error) {
+        debugPrint(
+          'Create customer vehicle image URL failed: $error',
+        );
+
+        image['signed_url'] = null;
+      }
+
+      images.add(image);
+    }
+
+    return images;
+  }
+
+  Future<Map<String, int>> deleteVehicleImages(
+      List<Map<String, dynamic>> images,
+      ) async {
+    int deletedCount = 0;
+    int failedCount = 0;
+
+    for (final image in images) {
+      final imageId =
+      image['image_id']?.toString().trim();
+
+      final storagePath =
+      image['storage_path']
+          ?.toString()
+          .trim();
+
+      if (imageId == null ||
+          imageId.isEmpty) {
+        failedCount++;
+        continue;
+      }
+
+      try {
+        await supabase
+            .from('vehicle_images')
+            .delete()
+            .eq('image_id', imageId);
+
+        /*
+       * The database record is removed first.
+       * If Storage cleanup fails, the deleted
+       * photo will still disappear from the app.
+       */
+        if (storagePath != null &&
+            storagePath.isNotEmpty) {
+          try {
+            await supabase.storage
+                .from('vehicle-photos')
+                .remove([storagePath]);
+          } catch (storageError) {
+            debugPrint(
+              'Vehicle photo Storage cleanup failed: '
+                  '$storageError',
+            );
+          }
+        }
+
+        deletedCount++;
+      } catch (error, stackTrace) {
+        failedCount++;
+
+        debugPrint(
+          'Delete vehicle image failed: $error',
+        );
+
+        debugPrint(stackTrace.toString());
+      }
+    }
+
+    return {
+      'deleted': deletedCount,
+      'failed': failedCount,
+    };
+  }
+
+  void showVehicleImagePreview({
+    required String imageUrl,
+    required String title,
+  }) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 28,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            height:
+            MediaQuery.of(dialogContext)
+                .size
+                .height *
+                0.75,
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.fromLTRB(
+                    16,
+                    8,
+                    6,
+                    8,
+                  ),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1F2937),
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(20),
+                      topRight: Radius.circular(20),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () {
+                          Navigator.pop(
+                            dialogContext,
+                          );
+                        },
+                        icon: const Icon(
+                          Icons.close,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: InteractiveViewer(
+                    minScale: 0.8,
+                    maxScale: 5,
+                    child: Center(
+                      child: Image.network(
+                        imageUrl,
+                        fit: BoxFit.contain,
+                        loadingBuilder: (
+                            context,
+                            child,
+                            progress,
+                            ) {
+                          if (progress == null) {
+                            return child;
+                          }
+
+                          return const Center(
+                            child:
+                            CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                          );
+                        },
+                        errorBuilder: (
+                            context,
+                            error,
+                            stackTrace,
+                            ) {
+                          return const Column(
+                            mainAxisAlignment:
+                            MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.broken_image,
+                                size: 55,
+                                color: Colors.white54,
+                              ),
+                              SizedBox(height: 10),
+                              Text(
+                                'Unable to display photo.',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> notifyAdminsVehicleClaim({
     required String plate,
     required String model,
@@ -358,9 +848,12 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
   Future<void> addVehicle({
     required String plate,
     required String model,
+    required List<XFile> vocPhotos,
+    required List<XFile> vehiclePhotos,
   }) async {
     final upperPlate =
     plate.trim().toUpperCase();
+
     final upperModel =
     model.trim().toUpperCase();
 
@@ -392,9 +885,9 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
         rpcResult,
       );
 
-      final vehicleId =
-      result['vehicle_id']
-          ?.toString();
+      final vehicleId = result['vehicle_id']
+          ?.toString()
+          .trim();
 
       final returnedPlate =
       result['plate_number']
@@ -410,6 +903,24 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
           vehicleId.isEmpty) {
         throw Exception(
           'Vehicle ID was not returned.',
+        );
+      }
+
+      final totalPhotoCount =
+          vocPhotos.length +
+              vehiclePhotos.length;
+
+      Map<String, int> uploadResult = {
+        'uploaded': 0,
+        'failed': 0,
+      };
+
+      if (totalPhotoCount > 0) {
+        uploadResult =
+        await uploadVehiclePhotos(
+          vehicleId: vehicleId,
+          vocPhotos: vocPhotos,
+          vehiclePhotos: vehiclePhotos,
         );
       }
 
@@ -442,14 +953,32 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
 
       await loadData();
 
-      showMessage(
-        'Vehicle added. You can book appointment while waiting for admin confirmation.',
-      );
-    } on PostgrestException catch (error) {
-      showMessage(
-        error.message,
-      );
+      final uploadedCount =
+          uploadResult['uploaded'] ?? 0;
 
+      final failedCount =
+          uploadResult['failed'] ?? 0;
+
+      if (totalPhotoCount == 0) {
+        showMessage(
+          'Vehicle added successfully. '
+              'Photos can be added later.',
+        );
+      } else if (failedCount == 0) {
+        showMessage(
+          'Vehicle and $uploadedCount '
+              'photo(s) added successfully.',
+        );
+      } else {
+        showMessage(
+          'Some photos could not be uploaded. '
+              'The vehicle was added successfully. '
+              '$uploadedCount photo(s) uploaded and '
+              '$failedCount failed.',
+        );
+      }
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
       await loadData();
     } catch (error, stackTrace) {
       debugPrint(
@@ -470,6 +999,10 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
     required String vehicleId,
     required String plate,
     required String model,
+    required List<XFile> vocPhotos,
+    required List<XFile> vehiclePhotos,
+    required List<Map<String, dynamic>>
+    removedExistingPhotos,
   }) async {
     final normalizedVehicleId =
     vehicleId.trim();
@@ -521,7 +1054,8 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
 
       final returnedVehicleId =
       result['vehicle_id']
-          ?.toString();
+          ?.toString()
+          .trim();
 
       final returnedPlate =
       result['plate_number']
@@ -547,9 +1081,22 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
       if (verificationStatus !=
           'Pending Claim') {
         throw Exception(
-          'The vehicle was not returned to Pending Claim status.',
+          'The vehicle was not returned to '
+              'Pending Claim status.',
         );
       }
+
+      final uploadResult =
+      await uploadVehiclePhotos(
+        vehicleId: returnedVehicleId,
+        vocPhotos: vocPhotos,
+        vehiclePhotos: vehiclePhotos,
+      );
+
+      final deleteResult =
+      await deleteVehicleImages(
+        removedExistingPhotos,
+      );
 
       try {
         await notifyAdminsVehicleClaim(
@@ -564,39 +1111,52 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
               ? upperModel
               : returnedModel,
         );
-      } catch (
-      notificationError,
-      stackTrace
-      ) {
+      } catch (notificationError) {
         debugPrint(
           'Vehicle update notification failed: '
               '$notificationError',
-        );
-
-        debugPrint(
-          stackTrace.toString(),
         );
       }
 
       await loadData();
 
-      showMessage(
-        'Vehicle updated. Status changed to Pending Claim.',
-      );
-    } on PostgrestException catch (error) {
-      showMessage(
-        error.message,
-      );
+      final uploadedCount =
+          uploadResult['uploaded'] ?? 0;
 
+      final uploadFailed =
+          uploadResult['failed'] ?? 0;
+
+      final deletedCount =
+          deleteResult['deleted'] ?? 0;
+
+      final deleteFailed =
+          deleteResult['failed'] ?? 0;
+
+      if (uploadFailed == 0 &&
+          deleteFailed == 0) {
+        showMessage(
+          'Vehicle updated successfully. '
+              '$uploadedCount new photo(s) uploaded and '
+              '$deletedCount photo(s) removed.',
+        );
+      } else {
+        showMessage(
+          'Vehicle information was updated, but '
+              'some photo changes failed. '
+              '$uploadedCount uploaded, '
+              '$deletedCount removed, '
+              '${uploadFailed + deleteFailed} failed.',
+        );
+      }
+    } on PostgrestException catch (error) {
+      showMessage(error.message);
       await loadData();
     } catch (error, stackTrace) {
       debugPrint(
         'Update customer vehicle failed: $error',
       );
 
-      debugPrint(
-        stackTrace.toString(),
-      );
+      debugPrint(stackTrace.toString());
 
       showMessage(
         'Failed to update vehicle: $error',
@@ -670,237 +1230,68 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
   }
 
   void showAddVehicleDialog() {
-    final plateController = TextEditingController();
-    final modelController = TextEditingController();
+    final plateController =
+    TextEditingController();
+
+    final modelController =
+    TextEditingController();
 
     showVehicleFormDialog(
       title: 'Add Vehicle',
-      subtitle: 'Enter your vehicle information to create a booking profile.',
+      subtitle:
+      'Enter your vehicle information. '
+          'Photos are optional but recommended.',
       plateController: plateController,
       modelController: modelController,
       buttonText: 'Add Vehicle',
-      onSave: () async {
-        final plate = plateController.text.trim();
-        final model = modelController.text.trim();
-
-        if (plate.isEmpty || model.isEmpty) {
-          showMessage('Please complete vehicle information.');
-          return;
-        }
-
-        Navigator.pop(context);
-
+      existingVocPhotos: const [],
+      existingVehiclePhotos: const [],
+      onSave: (
+          vocPhotos,
+          vehiclePhotos,
+          removedExistingPhotos,
+          ) async {
         await addVehicle(
-          plate: plate,
-          model: model,
+          plate: plateController.text,
+          model: modelController.text,
+          vocPhotos: vocPhotos,
+          vehiclePhotos: vehiclePhotos,
         );
       },
     );
   }
 
-  void showEditVehicleDialog(Map<String, dynamic> vehicle) {
-    final plateController = TextEditingController(
-      text: vehicle['plate_number'] ?? '',
-    );
+  Future<void> showEditVehicleDialog(
+      Map<String, dynamic> vehicle,
+      ) async {
+    final vehicleId =
+    vehicle['vehicle_id']
+        ?.toString()
+        .trim();
 
-    final modelController = TextEditingController(
-      text: vehicle['car_model'] ?? '',
-    );
+    if (vehicleId == null ||
+        vehicleId.isEmpty) {
+      showMessage(
+        'Vehicle information is missing.',
+      );
+      return;
+    }
 
-    showVehicleFormDialog(
-      title: 'Edit Vehicle',
-      subtitle: 'Update your vehicle information. Admin will verify again.',
-      plateController: plateController,
-      modelController: modelController,
-      buttonText: 'Save Changes',
-      onSave: () async {
-        final plate = plateController.text.trim();
-        final model = modelController.text.trim();
-
-        if (plate.isEmpty || model.isEmpty) {
-          showMessage('Please complete vehicle information.');
-          return;
-        }
-
-        Navigator.pop(context);
-
-        await updateVehicle(
-          vehicleId: vehicle['vehicle_id'].toString(),
-          plate: plate,
-          model: model,
-        );
-      },
-    );
-  }
-
-  void showVehicleFormDialog({
-    required String title,
-    required String subtitle,
-    required TextEditingController plateController,
-    required TextEditingController modelController,
-    required String buttonText,
-    required Future<void> Function() onSave,
-  }) {
-    showDialog(
+    showDialog<void>(
       context: context,
-      builder: (context) {
-        return Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 28,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(26),
-          ),
-          child: SingleChildScrollView(
+      barrierDismissible: false,
+      builder: (loadingContext) {
+        return const Center(
+          child: Card(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+              padding: EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFD7E5FA),
-                      borderRadius: BorderRadius.circular(22),
-                    ),
-                    child: Column(
-                      children: [
-                        const CircleAvatar(
-                          radius: 32,
-                          backgroundColor: Color(0xFF339BFF),
-                          child: Icon(
-                            Icons.directions_car,
-                            color: Colors.white,
-                            size: 34,
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1F2937),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          subtitle,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.black54,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 22),
-
-                  buildInputBox(
-                    controller: plateController,
-                    label: 'Vehicle Plate Number',
-                    hintText: 'Example: JSA9259',
-                    icon: Icons.confirmation_number,
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  buildInputBox(
-                    controller: modelController,
-                    label: 'Car Model',
-                    hintText: 'Example: HONDA CITY',
-                    icon: Icons.directions_car,
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.shade50,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.orange.withOpacity(0.35),
-                      ),
-                    ),
-                    child: const Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          Icons.info_outline,
-                          color: Colors.orange,
-                          size: 20,
-                        ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'New vehicles will be saved as Pending Claim. You can still book an appointment while waiting for admin confirmation.',
-                            style: TextStyle(
-                              color: Colors.black87,
-                              fontSize: 12,
-                              height: 1.35,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 22),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(
-                          height: 50,
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF339BFF),
-                              side: const BorderSide(
-                                color: Color(0xFF339BFF),
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text(
-                              'Cancel',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: SizedBox(
-                          height: 50,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF339BFF),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            onPressed: () async {
-                              await onSave();
-                            },
-                            child: Text(
-                              buttonText,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                  CircularProgressIndicator(),
+                  SizedBox(height: 14),
+                  Text(
+                    'Loading vehicle photos...',
                   ),
                 ],
               ),
@@ -909,92 +1300,1529 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
         );
       },
     );
+
+    try {
+      final allImages =
+      await fetchVehicleImages(vehicleId);
+
+      if (!mounted) return;
+
+      Navigator.of(
+        context,
+        rootNavigator: true,
+      ).pop();
+
+      final existingVocPhotos = allImages
+          .where(
+            (image) =>
+        image['image_type']
+            ?.toString() ==
+            'voc',
+      )
+          .map(
+            (image) =>
+        Map<String, dynamic>.from(
+          image,
+        ),
+      )
+          .toList();
+
+      final existingVehiclePhotos =
+      allImages
+          .where(
+            (image) =>
+        image['image_type']
+            ?.toString() ==
+            'vehicle',
+      )
+          .map(
+            (image) =>
+        Map<String, dynamic>.from(
+          image,
+        ),
+      )
+          .toList();
+
+      final plateController =
+      TextEditingController(
+        text:
+        vehicle['plate_number']
+            ?.toString() ??
+            '',
+      );
+
+      final modelController =
+      TextEditingController(
+        text:
+        vehicle['car_model']
+            ?.toString() ??
+            '',
+      );
+
+      showVehicleFormDialog(
+        title: 'Edit Vehicle',
+        subtitle:
+        'Update vehicle information and manage uploaded photos.',
+        plateController: plateController,
+        modelController: modelController,
+        buttonText: 'Save Changes',
+        existingVocPhotos:
+        existingVocPhotos,
+        existingVehiclePhotos:
+        existingVehiclePhotos,
+        onSave: (
+            newVocPhotos,
+            newVehiclePhotos,
+            removedExistingPhotos,
+            ) async {
+          await updateVehicle(
+            vehicleId: vehicleId,
+            plate: plateController.text,
+            model: modelController.text,
+            vocPhotos: newVocPhotos,
+            vehiclePhotos:
+            newVehiclePhotos,
+            removedExistingPhotos:
+            removedExistingPhotos,
+          );
+        },
+      );
+    } catch (error) {
+      if (mounted) {
+        Navigator.of(
+          context,
+          rootNavigator: true,
+        ).pop();
+
+        showMessage(
+          'Failed to load vehicle photos: '
+              '$error',
+        );
+      }
+    }
   }
 
-  void showVehicleDetailDialog(Map<String, dynamic> vehicle) {
-    final booking = vehicleBookings[vehicle['vehicle_id'].toString()];
-    final status = vehicle['verification_status'] ?? 'Pending Claim';
+  Widget buildPhotoPickerSection({
+    required String title,
+    required String description,
+    required List<Map<String, dynamic>>
+    existingPhotos,
+    required List<XFile> photos,
+    required VoidCallback onCamera,
+    required VoidCallback onGallery,
+    required ValueChanged<int>
+    onRemoveExisting,
+    required ValueChanged<int> onRemoveNew,
+  }) {
+    final totalCount =
+        existingPhotos.length + photos.length;
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Vehicle Details'),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          content: SizedBox(
-            width: 330,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                buildDetailRow('Plate Number', vehicle['plate_number'] ?? ''),
-                buildDetailRow('Car Model', vehicle['car_model'] ?? ''),
-                buildDetailRow('Record Status', getDisplayStatus(status)),
-                const SizedBox(height: 12),
-                const Divider(),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Appointment Information',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F7FA),
+        borderRadius:
+        BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.grey.shade300,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
                   ),
                 ),
-                const SizedBox(height: 8),
-                if (booking != null)
-                  buildDetailRow(
-                    'Appointment Date',
-                    formatDate(booking['appointment_date'].toString()),
-                  )
-                else
-                  const Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Appointment: None',
-                      style: TextStyle(color: Colors.grey),
-                    ),
+              ),
+              Container(
+                padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 9,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius:
+                  BorderRadius.circular(20),
+                ),
+                child: const Text(
+                  'Optional • Recommended',
+                  style: TextStyle(
+                    color: Color(0xFF339BFF),
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
                   ),
-              ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 5),
+
+          Text(
+            description,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 12,
             ),
           ),
-          actions: [
-            if (status != 'Verified' &&
-                status != 'Link Record')
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  showEditVehicleDialog(
-                    vehicle,
+
+          if (totalCount > 0) ...[
+            const SizedBox(height: 12),
+
+            SizedBox(
+              height: 100,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: totalCount,
+                separatorBuilder: (
+                    context,
+                    index,
+                    ) {
+                  return const SizedBox(
+                    width: 10,
                   );
                 },
-                child: const Text('Edit'),
+                itemBuilder: (
+                    context,
+                    index,
+                    ) {
+                  final isExisting =
+                      index <
+                          existingPhotos.length;
+
+                  if (isExisting) {
+                    final image =
+                    existingPhotos[index];
+
+                    final signedUrl =
+                    image['signed_url']
+                        ?.toString()
+                        .trim();
+
+                    final canOpen =
+                        signedUrl != null &&
+                            signedUrl.isNotEmpty;
+
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        InkWell(
+                          borderRadius:
+                          BorderRadius.circular(
+                            12,
+                          ),
+                          onTap: canOpen
+                              ? () {
+                            showVehicleImagePreview(
+                              imageUrl:
+                              signedUrl,
+                              title:
+                              '$title ${index + 1}',
+                            );
+                          }
+                              : null,
+                          child: ClipRRect(
+                            borderRadius:
+                            BorderRadius.circular(
+                              12,
+                            ),
+                            child: canOpen
+                                ? Image.network(
+                              signedUrl,
+                              width: 88,
+                              height: 88,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (
+                                  context,
+                                  child,
+                                  progress,
+                                  ) {
+                                if (progress ==
+                                    null) {
+                                  return child;
+                                }
+
+                                return Container(
+                                  width: 88,
+                                  height: 88,
+                                  color: Colors
+                                      .grey
+                                      .shade200,
+                                  child:
+                                  const Center(
+                                    child:
+                                    CircularProgressIndicator(
+                                      strokeWidth:
+                                      2,
+                                    ),
+                                  ),
+                                );
+                              },
+                              errorBuilder: (
+                                  context,
+                                  error,
+                                  stackTrace,
+                                  ) {
+                                return Container(
+                                  width: 88,
+                                  height: 88,
+                                  color: Colors
+                                      .grey
+                                      .shade200,
+                                  child:
+                                  const Icon(
+                                    Icons
+                                        .broken_image,
+                                  ),
+                                );
+                              },
+                            )
+                                : Container(
+                              width: 88,
+                              height: 88,
+                              color: Colors
+                                  .grey
+                                  .shade200,
+                              child:
+                              const Icon(
+                                Icons
+                                    .broken_image,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        Positioned(
+                          left: 4,
+                          bottom: 4,
+                          child: Container(
+                            padding:
+                            const EdgeInsets
+                                .symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            decoration:
+                            BoxDecoration(
+                              color: Colors.black
+                                  .withOpacity(0.65),
+                              borderRadius:
+                              BorderRadius.circular(
+                                6,
+                              ),
+                            ),
+                            child: const Text(
+                              'Uploaded',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        Positioned(
+                          right: -6,
+                          top: -6,
+                          child: InkWell(
+                            onTap: () {
+                              onRemoveExisting(
+                                index,
+                              );
+                            },
+                            child:
+                            const CircleAvatar(
+                              radius: 11,
+                              backgroundColor:
+                              Colors.red,
+                              child: Icon(
+                                Icons.close,
+                                color: Colors.white,
+                                size: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
+                  final newIndex =
+                      index -
+                          existingPhotos.length;
+
+                  final photo =
+                  photos[newIndex];
+
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      ClipRRect(
+                        borderRadius:
+                        BorderRadius.circular(
+                          12,
+                        ),
+                        child:
+                        FutureBuilder<Uint8List>(
+                          future:
+                          photo.readAsBytes(),
+                          builder: (
+                              context,
+                              snapshot,
+                              ) {
+                            if (snapshot.hasData) {
+                              return Image.memory(
+                                snapshot.data!,
+                                width: 88,
+                                height: 88,
+                                fit: BoxFit.cover,
+                              );
+                            }
+
+                            return Container(
+                              width: 88,
+                              height: 88,
+                              color:
+                              Colors.grey.shade200,
+                              child: const Center(
+                                child:
+                                CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+
+                      Positioned(
+                        left: 4,
+                        bottom: 4,
+                        child: Container(
+                          padding:
+                          const EdgeInsets
+                              .symmetric(
+                            horizontal: 5,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(
+                              0xFF339BFF,
+                            ).withOpacity(0.88),
+                            borderRadius:
+                            BorderRadius.circular(
+                              6,
+                            ),
+                          ),
+                          child: const Text(
+                            'New',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      Positioned(
+                        right: -6,
+                        top: -6,
+                        child: InkWell(
+                          onTap: () {
+                            onRemoveNew(newIndex);
+                          },
+                          child: const CircleAvatar(
+                            radius: 11,
+                            backgroundColor:
+                            Colors.red,
+                            child: Icon(
+                              Icons.close,
+                              color: Colors.white,
+                              size: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                showDeleteVehicleDialog(
-                  vehicle['vehicle_id']
-                      .toString(),
-                );
-              },
-              child: const Text(
-                'Delete',
-                style: TextStyle(
-                  color: Colors.red,
+            ),
+          ],
+
+          const SizedBox(height: 12),
+
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onCamera,
+                  icon: const Icon(
+                    Icons.camera_alt,
+                    size: 18,
+                  ),
+                  label:
+                  const Text('Camera'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onGallery,
+                  icon: const Icon(
+                    Icons.photo_library,
+                    size: 18,
+                  ),
+                  label:
+                  const Text('Gallery'),
+                ),
+              ),
+            ],
+          ),
+
+          if (totalCount > 0)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                '$totalCount photo(s)',
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 11,
                 ),
               ),
             ),
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
+        ],
+      ),
+    );
+  }
+
+  void showVehicleFormDialog({
+    required String title,
+    required String subtitle,
+    required TextEditingController
+    plateController,
+    required TextEditingController
+    modelController,
+    required String buttonText,
+    required List<Map<String, dynamic>>
+    existingVocPhotos,
+    required List<Map<String, dynamic>>
+    existingVehiclePhotos,
+    required Future<void> Function(
+        List<XFile> vocPhotos,
+        List<XFile> vehiclePhotos,
+        List<Map<String, dynamic>>
+        removedExistingPhotos,
+        ) onSave,
+  }) {
+    final List<XFile> vocPhotos = [];
+    final List<XFile> vehiclePhotos = [];
+
+    final currentExistingVocPhotos =
+    existingVocPhotos
+        .map(
+          (image) =>
+      Map<String, dynamic>.from(
+        image,
+      ),
+    )
+        .toList();
+
+    final currentExistingVehiclePhotos =
+    existingVehiclePhotos
+        .map(
+          (image) =>
+      Map<String, dynamic>.from(
+        image,
+      ),
+    )
+        .toList();
+
+    final removedExistingPhotos =
+    <Map<String, dynamic>>[];
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (
+              dialogContext,
+              setDialogState,
+              ) {
+            return Dialog(
+              insetPadding:
+              const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 28,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                BorderRadius.circular(26),
+              ),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding:
+                  const EdgeInsets.fromLTRB(
+                    22,
+                    22,
+                    22,
+                    18,
+                  ),
+                  child: Column(
+                    mainAxisSize:
+                    MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding:
+                        const EdgeInsets.all(
+                          18,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(
+                            0xFFD7E5FA,
+                          ),
+                          borderRadius:
+                          BorderRadius.circular(
+                            22,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            const CircleAvatar(
+                              radius: 32,
+                              backgroundColor:
+                              Color(
+                                0xFF339BFF,
+                              ),
+                              child: Icon(
+                                Icons.directions_car,
+                                color: Colors.white,
+                                size: 34,
+                              ),
+                            ),
+                            const SizedBox(
+                              height: 14,
+                            ),
+                            Text(
+                              title,
+                              style:
+                              const TextStyle(
+                                fontSize: 22,
+                                fontWeight:
+                                FontWeight.bold,
+                                color:
+                                Color(
+                                  0xFF1F2937,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(
+                              height: 6,
+                            ),
+                            Text(
+                              subtitle,
+                              textAlign:
+                              TextAlign.center,
+                              style:
+                              const TextStyle(
+                                color:
+                                Colors.black54,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 22),
+
+                      buildInputBox(
+                        controller:
+                        plateController,
+                        label:
+                        'Vehicle Plate Number',
+                        hintText:
+                        'Example: JSA9259',
+                        icon:
+                        Icons.confirmation_number,
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      buildInputBox(
+                        controller:
+                        modelController,
+                        label: 'Car Model',
+                        hintText:
+                        'Example: HONDA CITY',
+                        icon:
+                        Icons.directions_car,
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      buildPhotoPickerSection(
+                        title: 'VOC Photos',
+                        description:
+                        'Upload ownership document photos to help the admin verify the vehicle.',
+                        existingPhotos:
+                        currentExistingVocPhotos,
+                        photos: vocPhotos,
+                        onCamera: () {
+                          unawaited(
+                            pickVehiclePhotos(
+                              source:
+                              ImageSource.camera,
+                              targetPhotos:
+                              vocPhotos,
+                              setDialogState:
+                              setDialogState,
+                            ),
+                          );
+                        },
+                        onGallery: () {
+                          unawaited(
+                            pickVehiclePhotos(
+                              source:
+                              ImageSource.gallery,
+                              targetPhotos:
+                              vocPhotos,
+                              setDialogState:
+                              setDialogState,
+                            ),
+                          );
+                        },
+                        onRemoveExisting:
+                            (index) {
+                          setDialogState(() {
+                            final removed =
+                            currentExistingVocPhotos
+                                .removeAt(
+                              index,
+                            );
+
+                            removedExistingPhotos
+                                .add(removed);
+                          });
+                        },
+                        onRemoveNew: (index) {
+                          setDialogState(() {
+                            vocPhotos.removeAt(
+                              index,
+                            );
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      buildPhotoPickerSection(
+                        title: 'Vehicle Photos',
+                        description:
+                        'Upload exterior, interior or vehicle condition photos.',
+                        existingPhotos:
+                        currentExistingVehiclePhotos,
+                        photos: vehiclePhotos,
+                        onCamera: () {
+                          unawaited(
+                            pickVehiclePhotos(
+                              source:
+                              ImageSource.camera,
+                              targetPhotos:
+                              vehiclePhotos,
+                              setDialogState:
+                              setDialogState,
+                            ),
+                          );
+                        },
+                        onGallery: () {
+                          unawaited(
+                            pickVehiclePhotos(
+                              source:
+                              ImageSource.gallery,
+                              targetPhotos:
+                              vehiclePhotos,
+                              setDialogState:
+                              setDialogState,
+                            ),
+                          );
+                        },
+                        onRemoveExisting:
+                            (index) {
+                          setDialogState(() {
+                            final removed =
+                            currentExistingVehiclePhotos
+                                .removeAt(
+                              index,
+                            );
+
+                            removedExistingPhotos
+                                .add(removed);
+                          });
+                        },
+                        onRemoveNew: (index) {
+                          setDialogState(() {
+                            vehiclePhotos.removeAt(
+                              index,
+                            );
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      Container(
+                        width: double.infinity,
+                        padding:
+                        const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color:
+                          Colors.orange.shade50,
+                          borderRadius:
+                          BorderRadius.circular(
+                            16,
+                          ),
+                          border: Border.all(
+                            color: Colors.orange
+                                .withOpacity(0.35),
+                          ),
+                        ),
+                        child: const Row(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              Icons.info_outline,
+                              color: Colors.orange,
+                              size: 20,
+                            ),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Photos are optional. Clear VOC and vehicle photos are recommended to help the admin verify the vehicle.',
+                                style: TextStyle(
+                                  color:
+                                  Colors.black87,
+                                  fontSize: 12,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 22),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 50,
+                              child:
+                              OutlinedButton(
+                                style:
+                                OutlinedButton
+                                    .styleFrom(
+                                  foregroundColor:
+                                  const Color(
+                                    0xFF339BFF,
+                                  ),
+                                  side:
+                                  const BorderSide(
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                  ),
+                                  shape:
+                                  RoundedRectangleBorder(
+                                    borderRadius:
+                                    BorderRadius
+                                        .circular(
+                                      16,
+                                    ),
+                                  ),
+                                ),
+                                onPressed: () {
+                                  Navigator.pop(
+                                    dialogContext,
+                                  );
+                                },
+                                child: const Text(
+                                  'Cancel',
+                                  style: TextStyle(
+                                    fontWeight:
+                                    FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(width: 12),
+
+                          Expanded(
+                            child: SizedBox(
+                              height: 50,
+                              child:
+                              ElevatedButton(
+                                style:
+                                ElevatedButton
+                                    .styleFrom(
+                                  backgroundColor:
+                                  const Color(
+                                    0xFF339BFF,
+                                  ),
+                                  foregroundColor:
+                                  Colors.white,
+                                  shape:
+                                  RoundedRectangleBorder(
+                                    borderRadius:
+                                    BorderRadius
+                                        .circular(
+                                      16,
+                                    ),
+                                  ),
+                                ),
+                                onPressed: () async {
+                                  final plate =
+                                  plateController
+                                      .text
+                                      .trim();
+
+                                  final model =
+                                  modelController
+                                      .text
+                                      .trim();
+
+                                  if (plate.isEmpty ||
+                                      model.isEmpty) {
+                                    showMessage(
+                                      'Please complete vehicle information.',
+                                    );
+                                    return;
+                                  }
+
+                                  final selectedVocPhotos =
+                                  List<XFile>.from(
+                                    vocPhotos,
+                                  );
+
+                                  final selectedVehiclePhotos =
+                                  List<XFile>.from(
+                                    vehiclePhotos,
+                                  );
+
+                                  final selectedRemovedPhotos =
+                                  removedExistingPhotos
+                                      .map(
+                                        (image) =>
+                                    Map<String,
+                                        dynamic>.from(
+                                      image,
+                                    ),
+                                  )
+                                      .toList();
+
+                                  Navigator.pop(
+                                    dialogContext,
+                                  );
+
+                                  await onSave(
+                                    selectedVocPhotos,
+                                    selectedVehiclePhotos,
+                                    selectedRemovedPhotos,
+                                  );
+                                },
+                                child: Text(
+                                  buttonText,
+                                  style:
+                                  const TextStyle(
+                                    fontWeight:
+                                    FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
   }
 
+  Widget buildUploadedPhotoSection({
+    required String title,
+    required List<Map<String, dynamic>>
+    images,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F7FA),
+        borderRadius:
+        BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.grey.shade300,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Container(
+                padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color:
+                  const Color(0xFFD7E5FA),
+                  borderRadius:
+                  BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${images.length}',
+                  style: const TextStyle(
+                    color: Color(0xFF339BFF),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+
+          if (images.isEmpty)
+            const Text(
+              'No photos uploaded.',
+              style: TextStyle(
+                color: Colors.black54,
+                fontSize: 12,
+              ),
+            )
+          else
+            SizedBox(
+              height: 95,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: images.length,
+                separatorBuilder: (
+                    context,
+                    index,
+                    ) {
+                  return const SizedBox(
+                    width: 10,
+                  );
+                },
+                itemBuilder: (
+                    context,
+                    index,
+                    ) {
+                  final url =
+                  images[index]['signed_url']
+                      ?.toString()
+                      .trim();
+
+                  final canOpen =
+                      url != null &&
+                          url.isNotEmpty;
+
+                  return InkWell(
+                    borderRadius:
+                    BorderRadius.circular(12),
+                    onTap: canOpen
+                        ? () {
+                      showVehicleImagePreview(
+                        imageUrl: url,
+                        title:
+                        '$title ${index + 1}',
+                      );
+                    }
+                        : null,
+                    child: ClipRRect(
+                      borderRadius:
+                      BorderRadius.circular(
+                        12,
+                      ),
+                      child: canOpen
+                          ? Image.network(
+                        url,
+                        width: 100,
+                        height: 90,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (
+                            context,
+                            child,
+                            progress,
+                            ) {
+                          if (progress ==
+                              null) {
+                            return child;
+                          }
+
+                          return Container(
+                            width: 100,
+                            height: 90,
+                            color: Colors
+                                .grey
+                                .shade200,
+                            child:
+                            const Center(
+                              child:
+                              CircularProgressIndicator(
+                                strokeWidth:
+                                2,
+                              ),
+                            ),
+                          );
+                        },
+                        errorBuilder: (
+                            context,
+                            error,
+                            stackTrace,
+                            ) {
+                          return Container(
+                            width: 100,
+                            height: 90,
+                            color: Colors
+                                .grey
+                                .shade200,
+                            child:
+                            const Icon(
+                              Icons
+                                  .broken_image,
+                            ),
+                          );
+                        },
+                      )
+                          : Container(
+                        width: 100,
+                        height: 90,
+                        color:
+                        Colors.grey.shade200,
+                        child: const Icon(
+                          Icons.broken_image,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void showVehicleDetailDialog(
+      Map<String, dynamic> vehicle,
+      ) {
+    final vehicleId =
+        vehicle['vehicle_id']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final booking =
+    vehicleBookings[vehicleId];
+
+    final status =
+        vehicle['verification_status'] ??
+            'Pending Claim';
+
+    final imagesFuture =
+    fetchVehicleImages(vehicleId);
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 28,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius:
+            BorderRadius.circular(24),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight:
+              MediaQuery.of(dialogContext)
+                  .size
+                  .height *
+                  0.84,
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding:
+                const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize:
+                  MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding:
+                      const EdgeInsets.all(
+                        16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(
+                          0xFFD7E5FA,
+                        ),
+                        borderRadius:
+                        BorderRadius.circular(
+                          18,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          const CircleAvatar(
+                            radius: 28,
+                            backgroundColor:
+                            Color(
+                              0xFF339BFF,
+                            ),
+                            child: Icon(
+                              Icons.directions_car,
+                              color: Colors.white,
+                              size: 30,
+                            ),
+                          ),
+                          const SizedBox(
+                            height: 10,
+                          ),
+                          Text(
+                            vehicle['plate_number']
+                                ?.toString() ??
+                                '',
+                            style:
+                            const TextStyle(
+                              fontSize: 20,
+                              fontWeight:
+                              FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            vehicle['car_model']
+                                ?.toString() ??
+                                '',
+                            style:
+                            const TextStyle(
+                              color:
+                              Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    buildDetailRow(
+                      'Plate Number',
+                      vehicle['plate_number'] ??
+                          '',
+                    ),
+
+                    buildDetailRow(
+                      'Car Model',
+                      vehicle['car_model'] ??
+                          '',
+                    ),
+
+                    buildDetailRow(
+                      'Record Status',
+                      getDisplayStatus(
+                        status.toString(),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+                    const Divider(),
+                    const SizedBox(height: 8),
+
+                    const Align(
+                      alignment:
+                      Alignment.centerLeft,
+                      child: Text(
+                        'Uploaded Photos',
+                        style: TextStyle(
+                          fontWeight:
+                          FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    FutureBuilder<
+                        List<
+                            Map<String,
+                                dynamic>>>(
+                      future: imagesFuture,
+                      builder: (
+                          context,
+                          snapshot,
+                          ) {
+                        if (snapshot
+                            .connectionState ==
+                            ConnectionState
+                                .waiting) {
+                          return const Padding(
+                            padding:
+                            EdgeInsets.all(22),
+                            child:
+                            CircularProgressIndicator(),
+                          );
+                        }
+
+                        if (snapshot.hasError) {
+                          return Container(
+                            width: double.infinity,
+                            padding:
+                            const EdgeInsets
+                                .all(12),
+                            decoration:
+                            BoxDecoration(
+                              color:
+                              Colors.red.shade50,
+                              borderRadius:
+                              BorderRadius
+                                  .circular(12),
+                            ),
+                            child: Text(
+                              'Unable to load photos: '
+                                  '${snapshot.error}',
+                              style:
+                              const TextStyle(
+                                color: Colors.red,
+                                fontSize: 12,
+                              ),
+                            ),
+                          );
+                        }
+
+                        final allImages =
+                            snapshot.data ?? [];
+
+                        final vocImages =
+                        allImages
+                            .where(
+                              (image) =>
+                          image['image_type']
+                              ?.toString() ==
+                              'voc',
+                        )
+                            .toList();
+
+                        final vehiclePhotos =
+                        allImages
+                            .where(
+                              (image) =>
+                          image['image_type']
+                              ?.toString() ==
+                              'vehicle',
+                        )
+                            .toList();
+
+                        return Column(
+                          children: [
+                            buildUploadedPhotoSection(
+                              title:
+                              'VOC Photos',
+                              images:
+                              vocImages,
+                            ),
+                            const SizedBox(
+                              height: 10,
+                            ),
+                            buildUploadedPhotoSection(
+                              title:
+                              'Vehicle Photos',
+                              images:
+                              vehiclePhotos,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+
+                    const SizedBox(height: 14),
+                    const Divider(),
+                    const SizedBox(height: 8),
+
+                    const Align(
+                      alignment:
+                      Alignment.centerLeft,
+                      child: Text(
+                        'Appointment Information',
+                        style: TextStyle(
+                          fontWeight:
+                          FontWeight.bold,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    if (booking != null)
+                      buildDetailRow(
+                        'Appointment Date',
+                        formatDate(
+                          booking[
+                          'appointment_date']
+                              .toString(),
+                        ),
+                      )
+                    else
+                      const Align(
+                        alignment:
+                        Alignment.centerLeft,
+                        child: Text(
+                          'Appointment: None',
+                          style: TextStyle(
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ),
+
+                    const SizedBox(height: 18),
+
+                    Row(
+                      children: [
+                        if (status !=
+                            'Verified' &&
+                            status !=
+                                'Link Record') ...[
+                          Expanded(
+                            child:
+                            ElevatedButton.icon(
+                              style:
+                              ElevatedButton
+                                  .styleFrom(
+                                backgroundColor:
+                                const Color(
+                                  0xFF339BFF,
+                                ),
+                                foregroundColor:
+                                Colors.white,
+                              ),
+                              onPressed: () {
+                                Navigator.pop(
+                                  dialogContext,
+                                );
+
+                                unawaited(
+                                  showEditVehicleDialog(
+                                    vehicle,
+                                  ),
+                                );
+                              },
+                              icon: const Icon(
+                                Icons.edit,
+                                size: 18,
+                              ),
+                              label: const Text(
+                                'Edit',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+
+                        Expanded(
+                          child:
+                          OutlinedButton.icon(
+                            style: OutlinedButton
+                                .styleFrom(
+                              foregroundColor:
+                              Colors.red,
+                              side:
+                              const BorderSide(
+                                color: Colors.red,
+                              ),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(
+                                dialogContext,
+                              );
+
+                              showDeleteVehicleDialog(
+                                vehicleId,
+                              );
+                            },
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              size: 18,
+                            ),
+                            label: const Text(
+                              'Delete',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.pop(
+                            dialogContext,
+                          );
+                        },
+                        child:
+                        const Text('Close'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
   void showDeleteVehicleDialog(String vehicleId) {
     showDialog(
       context: context,
@@ -1297,8 +3125,9 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

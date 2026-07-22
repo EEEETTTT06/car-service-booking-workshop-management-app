@@ -10,7 +10,7 @@ import 'customer_quotations_page.dart';
 import 'service_records_page.dart';
 import 'customer_edit_profile_page.dart';
 import 'customer_settings_page.dart';
-import 'notification_page.dart';
+import 'customer_notification_page.dart';
 
 class NavigationControl extends StatefulWidget {
   final int initialIndex;
@@ -346,9 +346,7 @@ class _NavigationControlState extends State<NavigationControl> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => CustomerNotificationPage(
-                              onNavigate: changePage,
-                            ),
+                            builder: (_) => const CustomerNotificationPage(),
                           ),
                         );
                       },

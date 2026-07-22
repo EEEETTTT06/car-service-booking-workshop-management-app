@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../common/app_result_message.dart';
 
 class EditAdminProfilePage extends StatefulWidget {
   final Map<String, String> adminProfile;
@@ -55,39 +56,15 @@ class _EditAdminProfilePageState extends State<EditAdminProfilePage> {
   }
 
   void showMessage(
-      String message, {
-        bool isError = false,
-      }) {
+    String message, {
+    bool isError = false,
+  }) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        backgroundColor:
-        isError ? Colors.red.shade600 : const Color(0xFF339BFF),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        content: Row(
-          children: [
-            Icon(
-              isError ? Icons.error_outline : Icons.check_circle,
-              color: Colors.white,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                message,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    AppResultMessage.show(
+      context,
+      message: message,
+      type: isError ? AppResultType.error : AppResultMessage.inferType(message),
     );
   }
 

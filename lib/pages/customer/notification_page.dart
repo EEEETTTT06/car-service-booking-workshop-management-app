@@ -4,6 +4,7 @@ import 'my_vehicles_page.dart';
 import 'book_service_page.dart';
 import 'customer_quotations_page.dart';
 import 'service_records_page.dart';
+import '../common/app_result_message.dart';
 
 class CustomerNotificationPage extends StatefulWidget {
   final ValueChanged<int>? onNavigate;
@@ -262,8 +263,9 @@ class _CustomerNotificationPageState
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 

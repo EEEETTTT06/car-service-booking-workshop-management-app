@@ -7,6 +7,7 @@ import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 import 'admin_quotations_page.dart';
 import '../../services/customer_notification_service.dart';
+import '../common/app_result_message.dart';
 
 class PendingServicePage extends StatefulWidget {
   const PendingServicePage({super.key});
@@ -580,8 +581,9 @@ class _PendingServicePageState extends State<PendingServicePage> {
   void showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    AppResultMessage.show(
+      context,
+      message: message,
     );
   }
 
