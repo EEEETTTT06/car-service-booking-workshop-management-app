@@ -2184,7 +2184,11 @@ class _VehicleManagementPageState
       builder: (context) {
         return AlertDialog(
           title: const Text('Approve Claim'),
-          content: Text('Approve vehicle claim for $plate?'),
+          content: Text(
+            'Please check the plate number carefully before continuing.\n\n'
+                'Vehicle: $plate\n\n'
+                'Approve this vehicle claim?',
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
@@ -2218,7 +2222,11 @@ class _VehicleManagementPageState
       builder: (context) {
         return AlertDialog(
           title: const Text('Reject Claim'),
-          content: Text('Reject vehicle claim for $plate?'),
+          content: Text(
+            'Please check the plate number carefully before continuing.\n\n'
+                'Vehicle: $plate\n\n'
+                'Reject this vehicle claim?',
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
@@ -2253,7 +2261,9 @@ class _VehicleManagementPageState
         return AlertDialog(
           title: const Text('Set as Unclaim'),
           content: Text(
-            'Set $plate as unclaimed? The customer link will be removed.',
+            'Please check the plate number carefully before continuing.\n\n'
+                'Vehicle: $plate\n\n'
+                'Set this vehicle as unclaimed? The customer link will be removed.',
           ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),

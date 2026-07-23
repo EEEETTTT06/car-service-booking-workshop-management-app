@@ -18,7 +18,8 @@ class MyVehiclesPage extends StatefulWidget {
   State<MyVehiclesPage> createState() => _MyVehiclesPageState();
 }
 
-class _MyVehiclesPageState extends State<MyVehiclesPage> {
+class _MyVehiclesPageState extends State<MyVehiclesPage>
+    with WidgetsBindingObserver {
   bool isLoading = false;
 
   final ImagePicker imagePicker = ImagePicker();
@@ -32,12 +33,17 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
   Map<String, Map<String, dynamic>> vehicleBookings = {};
 
   RealtimeChannel? vehiclesRealtimeChannel;
+  Timer? realtimeRefreshTimer;
   bool isRealtimeRefreshing = false;
+  bool realtimeRefreshQueued = false;
+  bool realtimeSubscriptionReady = false;
+  bool isSchedulingReconnect = false;
 
   @override
   void initState() {
     super.initState();
 
+    WidgetsBinding.instance.addObserver(this);
     loadData();
 
     scrollController.addListener(() {
@@ -55,6 +61,9 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    realtimeRefreshTimer?.cancel();
+
     final channel = vehiclesRealtimeChannel;
 
     if (channel != null) {
@@ -65,6 +74,23 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
 
     scrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(
+      AppLifecycleState state,
+      ) {
+    if (state != AppLifecycleState.resumed) {
+      return;
+    }
+
+    // Always refresh when the app returns to the foreground. This is a
+    // fallback for mobile networks that temporarily pause Realtime sockets.
+    scheduleVehicleRefresh();
+
+    if (!realtimeSubscriptionReady) {
+      scheduleRealtimeReconnect();
+    }
   }
 
   void scrollToTop() {
@@ -151,13 +177,14 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
   void setupRealtimeSubscription() {
     if (currentCustomer == null) return;
 
-    // Prevent duplicate Realtime subscriptions.
     if (vehiclesRealtimeChannel != null) {
       return;
     }
 
     final customerId =
     currentCustomer!['customer_id'].toString();
+
+    realtimeSubscriptionReady = false;
 
     vehiclesRealtimeChannel = supabase
         .channel(
@@ -178,7 +205,7 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
               '${payload.eventType}',
         );
 
-        refreshVehiclesFromRealtime();
+        scheduleVehicleRefresh();
       },
     )
         .onPostgresChanges(
@@ -196,26 +223,102 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
               '${payload.eventType}',
         );
 
-        refreshVehiclesFromRealtime();
+        scheduleVehicleRefresh();
       },
     )
-        .subscribe();
+        .subscribe(
+          (status, error) {
+        debugPrint(
+          'Customer vehicle Realtime status: '
+              '$status${error == null ? '' : ' - $error'}',
+        );
+
+        realtimeSubscriptionReady =
+            status == RealtimeSubscribeStatus.subscribed;
+
+        if (status == RealtimeSubscribeStatus.channelError ||
+            status == RealtimeSubscribeStatus.timedOut ||
+            status == RealtimeSubscribeStatus.closed) {
+          scheduleRealtimeReconnect();
+        }
+      },
+    );
+  }
+
+  void scheduleVehicleRefresh() {
+    realtimeRefreshTimer?.cancel();
+
+    realtimeRefreshTimer = Timer(
+      const Duration(milliseconds: 300),
+          () {
+        unawaited(
+          refreshVehiclesFromRealtime(),
+        );
+      },
+    );
+  }
+
+  void scheduleRealtimeReconnect() {
+    if (!mounted || isSchedulingReconnect) {
+      return;
+    }
+
+    isSchedulingReconnect = true;
+
+    Future<void>.delayed(
+      const Duration(seconds: 2),
+          () async {
+        try {
+          if (!mounted) return;
+
+          final oldChannel = vehiclesRealtimeChannel;
+          vehiclesRealtimeChannel = null;
+          realtimeSubscriptionReady = false;
+
+          if (oldChannel != null) {
+            await supabase.removeChannel(oldChannel);
+          }
+
+          if (!mounted) return;
+
+          setupRealtimeSubscription();
+          scheduleVehicleRefresh();
+        } catch (error) {
+          debugPrint(
+            'Customer vehicle Realtime reconnect failed: '
+                '$error',
+          );
+        } finally {
+          isSchedulingReconnect = false;
+        }
+      },
+    );
   }
 
   Future<void> refreshVehiclesFromRealtime() async {
-    if (!mounted || isRealtimeRefreshing) {
+    if (!mounted) {
+      return;
+    }
+
+    if (isRealtimeRefreshing) {
+      // Do not lose a second event while the first refresh is running.
+      realtimeRefreshQueued = true;
       return;
     }
 
     isRealtimeRefreshing = true;
 
     try {
-      await fetchVehicles();
-      await fetchVehicleBookings();
+      do {
+        realtimeRefreshQueued = false;
 
-      if (mounted) {
-        setState(() {});
-      }
+        await fetchVehicles();
+        await fetchVehicleBookings();
+
+        if (mounted) {
+          setState(() {});
+        }
+      } while (mounted && realtimeRefreshQueued);
     } catch (error) {
       debugPrint(
         'Realtime vehicle refresh failed: $error',

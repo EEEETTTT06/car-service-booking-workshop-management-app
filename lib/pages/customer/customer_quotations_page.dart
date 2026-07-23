@@ -367,6 +367,14 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
       result['booking_id']
           ?.toString();
 
+      final isWalkIn =
+          result['is_walk_in'] == true ||
+              bookingId == null ||
+              bookingId.isEmpty;
+
+      final isArrived =
+          result['is_arrived'] == true;
+
       final returnedStatus =
       result['status']
           ?.toString();
@@ -456,8 +464,14 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
 
       showMessage(
         status == 'Confirmed'
-            ? 'Quotation confirmed. Please bring your vehicle to the workshop when ready.'
-            : 'Quotation rejected. The workshop may prepare a new quotation if necessary.',
+            ? isWalkIn && isArrived
+            ? 'Walk-in quotation confirmed. '
+            'Your vehicle is now available in the '
+            'Arrived section for live service tracking.'
+            : 'Quotation confirmed. Please bring your '
+            'vehicle to the workshop when ready.'
+            : 'Quotation rejected. The workshop may prepare '
+            'a new quotation if necessary.',
       );
     } on PostgrestException catch (error) {
       showMessage(
@@ -492,6 +506,8 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
   }) {
     final vehicle = quotation['vehicles'] ?? {};
     final plate = vehicle['plate_number'] ?? '';
+    final isWalkIn =
+        quotation['booking_id'] == null;
 
     showDialog(
       context: context,
@@ -502,11 +518,23 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
           ),
           content: Text(
             status == 'Confirmed'
-                ? 'Are you sure you want to confirm this quotation for $plate?\n\n'
-                'Confirming the quotation does not mean the vehicle has arrived. '
-                'The workshop will mark it as arrived when you bring the vehicle in.'
-                : 'Are you sure you want to reject this quotation for $plate? '
-                'The workshop will stop this quotation process.',
+                ? isWalkIn
+                ? 'Are you sure you want to confirm this '
+                'walk-in quotation for $plate?\n\n'
+                'This confirmation is evidence that '
+                'you accept the quotation. Because the '
+                'vehicle is already at the workshop, it '
+                'will immediately appear in the Arrived '
+                'section for service progress tracking.'
+                : 'Are you sure you want to confirm this '
+                'quotation for $plate?\n\n'
+                'Confirming the quotation does not mean '
+                'the vehicle has arrived. The workshop '
+                'will mark it as arrived when you bring '
+                'the vehicle in.'
+                : 'Are you sure you want to reject this '
+                'quotation for $plate? The workshop will '
+                'stop this quotation process.',
           ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
@@ -544,6 +572,8 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
     final items = quotation['quotation_items'] as List? ?? [];
     final status = quotation['status'] ?? 'Sent';
     final isArrived = quotation['is_arrived'] == true;
+    final isWalkIn =
+        quotation['booking_id'] == null;
 
     final total =
         double.tryParse(quotation['total'].toString()) ?? calculateTotal(items);
@@ -569,7 +599,16 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   buildDetailBox('Plate Number', vehicle['plate_number'] ?? ''),
-                  buildDetailBox('Car Model', vehicle['car_model'] ?? ''),
+                  buildDetailBox(
+                    'Car Model',
+                    vehicle['car_model'] ?? '',
+                  ),
+                  buildDetailBox(
+                    'Service Type',
+                    isWalkIn
+                        ? 'Walk-in'
+                        : 'Appointment',
+                  ),
                   buildDetailBox(
                     'Problem',
                     quotation['problem_description'] ?? 'No description',
@@ -579,7 +618,11 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
                   if (status == 'Confirmed')
                     buildDetailBox(
                       'Vehicle Arrival',
-                      isArrived ? 'Arrived' : 'Not Arrived',
+                      isArrived
+                          ? 'Arrived'
+                          : isWalkIn
+                          ? 'Waiting for Confirmation'
+                          : 'Not Arrived',
                     ),
 
                   const SizedBox(height: 14),
@@ -814,6 +857,8 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
     final items = quotation['quotation_items'] as List? ?? [];
     final status = quotation['status'] ?? 'Sent';
     final isArrived = quotation['is_arrived'] == true;
+    final isWalkIn =
+        quotation['booking_id'] == null;
     final total =
         double.tryParse(quotation['total'].toString()) ?? calculateTotal(items);
 
@@ -859,6 +904,34 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isWalkIn
+                              ? Icons.directions_walk
+                              : Icons.event_available,
+                          size: 15,
+                          color: isWalkIn
+                              ? Colors.purple
+                              : const Color(0xFF339BFF),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          isWalkIn
+                              ? 'Walk-in Service'
+                              : 'Appointment Service',
+                          style: TextStyle(
+                            color: isWalkIn
+                                ? Colors.purple
+                                : const Color(0xFF339BFF),
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 6),
                     Text(
@@ -913,6 +986,8 @@ class _CustomerQuotationPageState extends State<CustomerQuotationPage> {
                           Text(
                             isArrived
                                 ? 'Vehicle Arrived'
+                                : isWalkIn
+                                ? 'Waiting for Confirmation'
                                 : 'Vehicle Not Arrived',
                             style: TextStyle(
                               color: isArrived

@@ -1884,8 +1884,9 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
             ],
           ),
           content: Text(
-            'Confirm that vehicle $plate has physically arrived at the workshop?\n\n'
-                'It will be added to Pending Services.',
+            'Please physically check the plate number before continuing.\n\n'
+                'Plate Number: $plate\n\n'
+                'Mark this vehicle as Arrived and add it to Pending Services?',
           ),
           actions: [
             TextButton(

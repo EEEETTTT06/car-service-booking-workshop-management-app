@@ -447,13 +447,20 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
       Map<String, dynamic> booking,
       ) async {
     final isRejected = booking['status'] == 'Rejected';
+    final vehicle = booking['vehicles'] ?? <String, dynamic>{};
+    final plate = vehicle['plate_number']?.toString().trim() ?? '';
+    final model = vehicle['car_model']?.toString().trim() ?? '';
+    final displayPlate = plate.isEmpty ? 'Not Provided' : plate;
+    final displayModel = model.isEmpty ? 'Not Provided' : model;
 
     final confirmed = await showActionConfirmation(
       title: isRejected ? 'Approve Again?' : 'Approve Appointment?',
-      message: isRejected
-          ? 'Are you sure you want to approve this previously rejected appointment?'
-          : 'Are you sure you want to approve this appointment?',
-      confirmText: 'Approve',
+      message:
+      'Please check the vehicle before continuing.\n\n'
+          'Plate Number: $displayPlate\n'
+          'Car Model: $displayModel\n\n'
+          '${isRejected ? 'Approve this previously rejected appointment?' : 'Approve this appointment?'}',
+      confirmText: 'Approve $displayPlate',
       confirmColor: Colors.green,
       icon: Icons.check_circle_outline,
     );
@@ -466,11 +473,20 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
   Future<void> confirmCustomerArrived(
       Map<String, dynamic> booking,
       ) async {
+    final vehicle = booking['vehicles'] ?? <String, dynamic>{};
+    final plate = vehicle['plate_number']?.toString().trim() ?? '';
+    final model = vehicle['car_model']?.toString().trim() ?? '';
+    final displayPlate = plate.isEmpty ? 'Not Provided' : plate;
+    final displayModel = model.isEmpty ? 'Not Provided' : model;
+
     final confirmed = await showActionConfirmation(
-      title: 'Customer Arrived?',
+      title: 'Confirm Vehicle Arrival',
       message:
-      'Confirm that the customer and vehicle have arrived at the workshop.',
-      confirmText: 'Confirm Arrival',
+      'Please physically check the plate number before continuing.\n\n'
+          'Plate Number: $displayPlate\n'
+          'Car Model: $displayModel\n\n'
+          'Mark this vehicle as Arrived and move it to Pending Services?',
+      confirmText: 'Arrived: $displayPlate',
       confirmColor: Colors.orange,
       icon: Icons.directions_car,
     );
@@ -859,11 +875,25 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
 
                 Navigator.pop(context);
 
+                final vehicle =
+                    booking['vehicles'] ?? <String, dynamic>{};
+                final plate =
+                    vehicle['plate_number']?.toString().trim() ?? '';
+                final model =
+                    vehicle['car_model']?.toString().trim() ?? '';
+                final displayPlate =
+                plate.isEmpty ? 'Not Provided' : plate;
+                final displayModel =
+                model.isEmpty ? 'Not Provided' : model;
+
                 final confirmed = await showActionConfirmation(
                   title: 'Reject Appointment?',
                   message:
-                  'Are you sure you want to reject this appointment?\n\nReason: $reason',
-                  confirmText: 'Reject',
+                  'Please check the vehicle before continuing.\n\n'
+                      'Plate Number: $displayPlate\n'
+                      'Car Model: $displayModel\n\n'
+                      'Reason: $reason',
+                  confirmText: 'Reject $displayPlate',
                   confirmColor: Colors.red,
                   icon: Icons.cancel_outlined,
                 );

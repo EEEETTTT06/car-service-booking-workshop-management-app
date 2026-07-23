@@ -25,6 +25,8 @@ class _BookServicePageState extends State<BookServicePage>
   bool showBackToTop = false;
   Map<String, dynamic>? currentCustomer;
   List<Map<String, dynamic>> bookings = [];
+  List<Map<String, dynamic>> walkInPendingServices = [];
+  List<Map<String, dynamic>> walkInServiceRecords = [];
   RealtimeChannel? bookingRealtimeChannel;
 
   Timer? realtimeRefreshTimer;
@@ -110,77 +112,390 @@ class _BookServicePageState extends State<BookServicePage>
   Future<void> fetchBookings() async {
     if (currentCustomer == null) return;
 
-    final response = await supabase
-        .from('bookings')
-        .select('''
-          *,
-          vehicles(plate_number, car_model),
-          booking_services(
-            services(service_id, service_name, price)
-          ),
-          pending_services!pending_services_booking_id_fkey(
-            pending_id,
-            service_type,
-            status,
-            note,
-            estimated_completion_at,
-            updated_at
-          )
-        ''')
-        .eq('customer_id', currentCustomer!['customer_id'])
-        .order('appointment_date', ascending: true);
+    final customerId =
+    currentCustomer!['customer_id'].toString();
 
-    bookings = List<Map<String, dynamic>>.from(response);
+    final responses = await Future.wait([
+      supabase
+          .from('bookings')
+          .select('''
+            *,
+            vehicles(plate_number, car_model),
+            booking_services(
+              services(service_id, service_name, price)
+            ),
+            pending_services!pending_services_booking_id_fkey(
+              pending_id,
+              service_type,
+              status,
+              note,
+              created_at,
+              estimated_completion_at,
+              updated_at
+            )
+          ''')
+          .eq('customer_id', customerId)
+          .order('appointment_date', ascending: true),
+      supabase
+          .from('pending_services')
+          .select('''
+            *,
+            vehicles(plate_number, car_model),
+            quotations(
+              quotation_id,
+              booking_id,
+              status,
+              is_arrived,
+              problem_description,
+              total,
+              quotation_items(
+                item_id,
+                item_name,
+                quantity,
+                price
+              )
+            )
+          ''')
+          .eq('customer_id', customerId)
+          .isFilter('booking_id', null)
+          .order('created_at', ascending: false),
+      supabase
+          .from('service_records')
+          .select('''
+            *,
+            vehicles(plate_number, car_model),
+            service_record_items(
+              item_id,
+              item_name,
+              quantity,
+              price
+            )
+          ''')
+          .eq('customer_id', customerId)
+          .isFilter('booking_id', null)
+          .order('created_at', ascending: false),
+    ]);
 
+    bookings =
+    List<Map<String, dynamic>>.from(
+      responses[0] as List,
+    );
+
+    walkInPendingServices =
+    List<Map<String, dynamic>>.from(
+      responses[1] as List,
+    );
+
+    walkInServiceRecords =
+    List<Map<String, dynamic>>.from(
+      responses[2] as List,
+    );
+  }
+
+  String dateOnlyFromTimestamp(dynamic value) {
+    final rawValue = value?.toString().trim() ?? '';
+
+    final parsed = DateTime.tryParse(rawValue)
+        ?.toLocal() ??
+        DateTime.now();
+
+    return toSqlDate(parsed);
+  }
+
+  bool isWalkInEntry(Map<String, dynamic> entry) {
+    return entry['_entry_type']
+        ?.toString()
+        .startsWith('walk_in') ==
+        true;
+  }
+
+  Map<String, dynamic> buildWalkInPendingEntry(
+      Map<String, dynamic> pending,
+      ) {
+    final quotationValue = pending['quotations'];
+
+    final quotation = quotationValue is Map
+        ? Map<String, dynamic>.from(
+      quotationValue,
+    )
+        : <String, dynamic>{};
+
+    final status =
+        pending['status']?.toString() ??
+            'Waiting Fix';
+
+    return {
+      '_entry_type': 'walk_in_pending',
+      '_source_id': pending['pending_id'],
+      'booking_id': null,
+      'quotation_id':
+      pending['quotation_id'],
+      'appointment_date':
+      dateOnlyFromTimestamp(
+        pending['created_at'] ??
+            pending['updated_at'],
+      ),
+      'arrived_at':
+      pending['created_at'] ??
+          pending['updated_at'],
+      'problem_description':
+      quotation['problem_description'] ??
+          pending['note'] ??
+          '',
+      'status':
+      status == 'Completed'
+          ? 'Completed'
+          : 'Arrived',
+      'rejection_reason': null,
+      'vehicles':
+      pending['vehicles'] ?? {},
+      'booking_services': const [],
+      'pending_services': [
+        Map<String, dynamic>.from(
+          pending,
+        ),
+      ],
+      '_service_items':
+      normalizeRelatedRows(
+        quotation['quotation_items'],
+      ),
+      '_quotation_total':
+      quotation['total'],
+      '_quotation_status':
+      quotation['status'],
+      '_service_type': 'Walk-in',
+    };
+  }
+
+  Map<String, dynamic> buildWalkInRecordEntry(
+      Map<String, dynamic> record,
+      ) {
+    return {
+      '_entry_type': 'walk_in_record',
+      '_source_id': record['record_id'],
+      'booking_id': null,
+      'quotation_id':
+      record['quotation_id'],
+      'appointment_date':
+      dateOnlyFromTimestamp(
+        record['created_at'],
+      ),
+      'arrived_at': null,
+      'problem_description':
+      record['problem_description'] ?? '',
+      'status': 'Completed',
+      'rejection_reason': null,
+      'vehicles':
+      record['vehicles'] ?? {},
+      'booking_services': const [],
+      'pending_services': [
+        {
+          'pending_id': null,
+          'service_type': 'Walk-in',
+          'status': 'Completed',
+          'note': record['service_action'],
+          'estimated_completion_at': null,
+          'updated_at': record['created_at'],
+        },
+      ],
+      '_service_items':
+      normalizeRelatedRows(
+        record['service_record_items'],
+      ),
+      '_record_total':
+      record['total_price'],
+      '_service_type': 'Walk-in',
+      '_service_action':
+      record['service_action'],
+    };
+  }
+
+  List<Map<String, dynamic>>
+  get allServiceEntries {
+    final entries =
+    <Map<String, dynamic>>[];
+
+    for (final booking in bookings) {
+      entries.add({
+        ...booking,
+        '_entry_type': 'appointment',
+        '_service_type': 'Appointment',
+      });
+    }
+
+    final completedQuotationIds =
+    walkInServiceRecords
+        .map(
+          (record) =>
+          record['quotation_id']
+              ?.toString(),
+    )
+        .whereType<String>()
+        .where(
+          (id) => id.isNotEmpty,
+    )
+        .toSet();
+
+    for (final pending
+    in walkInPendingServices) {
+      final quotationId =
+      pending['quotation_id']
+          ?.toString();
+
+      final status =
+      pending['status']?.toString();
+
+      if (status == 'Completed' &&
+          quotationId != null &&
+          completedQuotationIds
+              .contains(quotationId)) {
+        continue;
+      }
+
+      entries.add(
+        buildWalkInPendingEntry(
+          pending,
+        ),
+      );
+    }
+
+    for (final record
+    in walkInServiceRecords) {
+      entries.add(
+        buildWalkInRecordEntry(
+          record,
+        ),
+      );
+    }
+
+    return entries;
   }
 
   void setupRealtimeSubscription() {
     if (currentCustomer == null) return;
 
-    // Prevent duplicate subscriptions.
     if (bookingRealtimeChannel != null) {
       return;
     }
 
     final customerId =
-    currentCustomer!['customer_id'].toString();
+    currentCustomer!['customer_id']
+        .toString();
+
+    void handleChange(
+        String source,
+        dynamic eventType,
+        ) {
+      debugPrint(
+        '$source changed: $eventType',
+      );
+
+      scheduleRealtimeRefresh();
+    }
 
     bookingRealtimeChannel = supabase
         .channel(
-      'customer-bookings-$customerId',
+      'customer-service-tracking-$customerId',
     )
         .onPostgresChanges(
       event: PostgresChangeEvent.all,
       schema: 'public',
       table: 'bookings',
       filter: PostgresChangeFilter(
-        type: PostgresChangeFilterType.eq,
+        type:
+        PostgresChangeFilterType.eq,
         column: 'customer_id',
         value: customerId,
       ),
       callback: (payload) {
-        debugPrint(
-          'Customer booking changed: '
-              '${payload.eventType}',
+        handleChange(
+          'Customer booking',
+          payload.eventType,
         );
-
-        scheduleRealtimeRefresh();
       },
     )
         .onPostgresChanges(
       event: PostgresChangeEvent.all,
       schema: 'public',
       table: 'pending_services',
+      filter: PostgresChangeFilter(
+        type:
+        PostgresChangeFilterType.eq,
+        column: 'customer_id',
+        value: customerId,
+      ),
       callback: (payload) {
-        debugPrint(
-          'Pending service changed: '
-              '${payload.eventType}',
+        handleChange(
+          'Customer pending service',
+          payload.eventType,
         );
-
-        scheduleRealtimeRefresh();
       },
     )
-        .subscribe();
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotations',
+      filter: PostgresChangeFilter(
+        type:
+        PostgresChangeFilterType.eq,
+        column: 'customer_id',
+        value: customerId,
+      ),
+      callback: (payload) {
+        handleChange(
+          'Customer quotation',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'quotation_items',
+      callback: (payload) {
+        handleChange(
+          'Quotation item',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'service_records',
+      filter: PostgresChangeFilter(
+        type:
+        PostgresChangeFilterType.eq,
+        column: 'customer_id',
+        value: customerId,
+      ),
+      callback: (payload) {
+        handleChange(
+          'Customer service record',
+          payload.eventType,
+        );
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'service_record_items',
+      callback: (payload) {
+        handleChange(
+          'Service record item',
+          payload.eventType,
+        );
+      },
+    )
+        .subscribe(
+          (status, error) {
+        debugPrint(
+          'Customer service tracking '
+              'Realtime status: $status'
+              '${error == null ? '' : ' - $error'}',
+        );
+      },
+    );
   }
 
   void scheduleRealtimeRefresh() {
@@ -543,8 +858,9 @@ class _BookServicePageState extends State<BookServicePage>
 
   List<Map<String, dynamic>>
   get filteredBookings {
-    final result = bookings.where((booking) {
-      return getDisplayStatus(booking) ==
+    final result =
+    allServiceEntries.where((entry) {
+      return getDisplayStatus(entry) ==
           selectedFilter;
     }).toList();
 
@@ -553,22 +869,53 @@ class _BookServicePageState extends State<BookServicePage>
 
   List<Map<String, dynamic>>
   get cancelledBookings {
-    final result = bookings.where((booking) {
-      return getDisplayStatus(booking) ==
-          'Cancelled';
+    final result =
+    allServiceEntries.where((entry) {
+      return !isWalkInEntry(entry) &&
+          getDisplayStatus(entry) ==
+              'Cancelled';
     }).toList();
 
     return sortBookingList(result);
   }
 
   int getStatusCount(String filter) {
-    return bookings.where((booking) {
-      return getDisplayStatus(booking) == filter;
+    return allServiceEntries.where((entry) {
+      return getDisplayStatus(entry) ==
+          filter;
     }).length;
   }
 
-  List<Map<String, dynamic>> getServices(Map<String, dynamic> booking) {
-    final bookingServices = normalizeRelatedRows(
+  List<Map<String, dynamic>> getServices(
+      Map<String, dynamic> booking,
+      ) {
+    if (isWalkInEntry(booking)) {
+      return normalizeRelatedRows(
+        booking['_service_items'],
+      ).map((item) {
+        return {
+          'service_id': item['item_id'],
+          'service_name':
+          item['item_name'] ??
+              'Service Item',
+          'quantity':
+          int.tryParse(
+            item['quantity']?.toString() ??
+                '1',
+          ) ??
+              1,
+          'price':
+          double.tryParse(
+            item['price']?.toString() ??
+                '0',
+          ) ??
+              0,
+        };
+      }).toList();
+    }
+
+    final bookingServices =
+    normalizeRelatedRows(
       booking['booking_services'],
     );
 
@@ -577,7 +924,9 @@ class _BookServicePageState extends State<BookServicePage>
       final service = item['services'];
 
       if (service is Map) {
-        return Map<String, dynamic>.from(service);
+        return Map<String, dynamic>.from(
+          service,
+        );
       }
 
       return null;
@@ -586,11 +935,49 @@ class _BookServicePageState extends State<BookServicePage>
         .toList();
   }
 
-  double getTotalPrice(Map<String, dynamic> booking) {
+  double getTotalPrice(
+      Map<String, dynamic> booking,
+      ) {
+    final storedRecordTotal =
+    double.tryParse(
+      booking['_record_total']?.toString() ??
+          '',
+    );
+
+    if (storedRecordTotal != null &&
+        storedRecordTotal > 0) {
+      return storedRecordTotal;
+    }
+
+    final storedQuotationTotal =
+    double.tryParse(
+      booking['_quotation_total']
+          ?.toString() ??
+          '',
+    );
+
+    if (storedQuotationTotal != null &&
+        storedQuotationTotal > 0) {
+      return storedQuotationTotal;
+    }
+
     double total = 0;
 
-    for (final service in getServices(booking)) {
-      total += double.tryParse(service['price'].toString()) ?? 0;
+    for (final service
+    in getServices(booking)) {
+      final quantity = int.tryParse(
+        service['quantity']?.toString() ??
+            '1',
+      ) ??
+          1;
+
+      final price = double.tryParse(
+        service['price']?.toString() ??
+            '0',
+      ) ??
+          0;
+
+      total += quantity * price;
     }
 
     return total;
@@ -1105,13 +1492,15 @@ class _BookServicePageState extends State<BookServicePage>
   void showBookingDetailDialog(Map<String, dynamic> booking) {
     final vehicle = booking['vehicles'] ?? {};
     final services = getServices(booking);
+    final isWalkIn = isWalkInEntry(booking);
     final status =
         booking['status']?.toString() ?? 'Booked';
 
     final progress = getServiceProgress(booking);
 
     final isAutoCancelled =
-        getDisplayStatus(booking) == 'Cancelled' &&
+        !isWalkIn &&
+            getDisplayStatus(booking) == 'Cancelled' &&
             isPastBooking(
               booking['appointment_date'].toString(),
             ) &&
@@ -1168,9 +1557,13 @@ class _BookServicePageState extends State<BookServicePage>
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(22),
           ),
-          title: const Text(
-            'Booking Details',
-            style: TextStyle(fontWeight: FontWeight.bold),
+          title: Text(
+            isWalkIn
+                ? 'Walk-in Service Details'
+                : 'Booking Details',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+            ),
           ),
           content: SizedBox(
             width: 420,
@@ -1179,10 +1572,26 @@ class _BookServicePageState extends State<BookServicePage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   buildDetailBox('Plate Number', vehicle['plate_number'] ?? ''),
-                  buildDetailBox('Car Model', vehicle['car_model'] ?? ''),
-                  buildDetailBox('Appointment Date', date),
                   buildDetailBox(
-                    'Booking Status',
+                    'Car Model',
+                    vehicle['car_model'] ?? '',
+                  ),
+                  buildDetailBox(
+                    'Service Type',
+                    isWalkIn
+                        ? 'Walk-in'
+                        : 'Appointment',
+                  ),
+                  buildDetailBox(
+                    isWalkIn
+                        ? 'Walk-in Date'
+                        : 'Appointment Date',
+                    date,
+                  ),
+                  buildDetailBox(
+                    isWalkIn
+                        ? 'Service Status'
+                        : 'Booking Status',
                     displayedStatus,
                   ),
                   if (showServiceTiming)
@@ -1203,7 +1612,7 @@ class _BookServicePageState extends State<BookServicePage>
                     buildDetailBox('Notes', problem),
                   const SizedBox(height: 14),
                   const Text(
-                    'Selected Services',
+                    'Service Items',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
@@ -1214,16 +1623,25 @@ class _BookServicePageState extends State<BookServicePage>
                     final price =
                         double.tryParse(service['price'].toString()) ?? 0;
 
+                    final quantity =
+                        int.tryParse(
+                          service['quantity']
+                              ?.toString() ??
+                              '1',
+                        ) ??
+                            1;
+
                     return buildServiceItem(
                       service['service_name'] ?? '',
                       price,
+                      quantity: quantity,
                     );
                   }),
                   const Divider(height: 24),
                   Align(
                     alignment: Alignment.centerRight,
                     child: Text(
-                      'Estimated Total: RM ${total.toStringAsFixed(2)}',
+                      'Total: RM ${total.toStringAsFixed(2)}',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
@@ -1235,7 +1653,7 @@ class _BookServicePageState extends State<BookServicePage>
             ),
           ),
           actions: [
-            if (canModifyBooking(status))
+            if (!isWalkIn && canModifyBooking(status))
               TextButton(
                 onPressed: () {
                   Navigator.pop(context);
@@ -1243,7 +1661,7 @@ class _BookServicePageState extends State<BookServicePage>
                 },
                 child: const Text('Edit Booking'),
               ),
-            if (canModifyBooking(status))
+            if (!isWalkIn && canModifyBooking(status))
               TextButton(
                 onPressed: () {
                   Navigator.pop(context);
@@ -1706,7 +2124,11 @@ class _BookServicePageState extends State<BookServicePage>
     );
   }
 
-  Widget buildServiceItem(String name, double price) {
+  Widget buildServiceItem(
+      String name,
+      double price, {
+        int quantity = 1,
+      }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -1729,8 +2151,12 @@ class _BookServicePageState extends State<BookServicePage>
             ),
           ),
           Text(
-            'RM ${price.toStringAsFixed(2)}',
-            style: const TextStyle(fontWeight: FontWeight.bold),
+            quantity > 1
+                ? 'Qty $quantity × RM ${price.toStringAsFixed(2)}'
+                : 'RM ${price.toStringAsFixed(2)}',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),
@@ -1945,17 +2371,26 @@ class _BookServicePageState extends State<BookServicePage>
   Widget buildBookingCard(Map<String, dynamic> booking) {
     final vehicle = booking['vehicles'] ?? {};
     final services = getServices(booking);
+    final isWalkIn = isWalkInEntry(booking);
     final status = booking['status'] ?? 'Booked';
     final progress = getServiceProgress(booking);
-    final isToday = isTodayBooking(booking['appointment_date']);
+    final isToday =
+        !isWalkIn &&
+            isTodayBooking(
+              booking['appointment_date'],
+            );
     final date = formatDate(booking['appointment_date']);
     final problem = booking['problem_description'] ?? '';
     final rejectionReason = booking['rejection_reason'] ?? '';
-    final isAutoCancelled = getDisplayStatus(booking) == 'Cancelled' &&
-        isPastBooking(booking['appointment_date'].toString()) &&
-        status != 'Cancelled' &&
-        status != 'Rejected' &&
-        status != 'Completed';
+    final isAutoCancelled =
+        !isWalkIn &&
+            getDisplayStatus(booking) == 'Cancelled' &&
+            isPastBooking(
+              booking['appointment_date'].toString(),
+            ) &&
+            status != 'Cancelled' &&
+            status != 'Rejected' &&
+            status != 'Completed';
     final bookingCategory =
     getDisplayStatus(booking);
 
@@ -2027,6 +2462,32 @@ class _BookServicePageState extends State<BookServicePage>
                     ),
                   ),
                 ),
+              if (isWalkIn)
+                Container(
+                  margin: const EdgeInsets.only(
+                    bottom: 12,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.purple.shade50,
+                    borderRadius:
+                    BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.purple.shade200,
+                    ),
+                  ),
+                  child: const Text(
+                    'WALK-IN SERVICE',
+                    style: TextStyle(
+                      color: Colors.purple,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               Row(
                 children: [
                   const CircleAvatar(
@@ -2081,7 +2542,9 @@ class _BookServicePageState extends State<BookServicePage>
                   const Icon(Icons.event, size: 17, color: Colors.black45),
                   const SizedBox(width: 8),
                   Text(
-                    date,
+                    isWalkIn
+                        ? 'Walk-in: $date'
+                        : date,
                     style: TextStyle(
                       color: isToday ? Colors.red : Colors.black87,
                       fontWeight: isToday ? FontWeight.bold : FontWeight.w600,
@@ -2241,7 +2704,7 @@ class _BookServicePageState extends State<BookServicePage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'My Service Bookings',
+                      'My Vehicle Services',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 22,
@@ -2250,7 +2713,7 @@ class _BookServicePageState extends State<BookServicePage>
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'View and manage your workshop appointments',
+                      'Track appointments and walk-in service progress',
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 14,
@@ -2318,7 +2781,7 @@ class _BookServicePageState extends State<BookServicePage>
                   ),
                   child: Center(
                     child: Text(
-                      'No $selectedFilter bookings.',
+                      'No $selectedFilter services.',
                       style: const TextStyle(
                         fontSize: 16,
                         color: Colors.black54,

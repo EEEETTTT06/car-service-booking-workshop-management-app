@@ -738,6 +738,107 @@ class _PendingServicePageState extends State<PendingServicePage> {
 
     return total;
   }
+  Future<bool> showStatusChangeConfirmation({
+    required Map<String, dynamic> service,
+    required String newStatus,
+    DateTime? estimatedCompletionAt,
+  }) async {
+    final vehicle = service['vehicles'] ?? <String, dynamic>{};
+    final plate = vehicle['plate_number']?.toString().trim() ?? '';
+    final model = vehicle['car_model']?.toString().trim() ?? '';
+    final currentStatus =
+        service['status']?.toString().trim() ?? 'Not Provided';
+    final displayPlate = plate.isEmpty ? 'Not Provided' : plate;
+    final displayModel = model.isEmpty ? 'Not Provided' : model;
+    final hasQuotation =
+        service['quotation_id']?.toString().trim().isNotEmpty == true;
+
+    final String extraMessage;
+
+    if (newStatus == 'Completed' && hasQuotation) {
+      extraMessage =
+      'A Service Record will be generated automatically using the '
+          'confirmed quotation items and prices.';
+    } else if (newStatus == 'Completed') {
+      extraMessage =
+      'This service has no linked quotation. Complete it now and then '
+          'create the Service Record manually.';
+    } else if (newStatus == 'In Progress' &&
+        estimatedCompletionAt != null) {
+      extraMessage =
+      'Estimated completion: '
+          '${formatDateTime(estimatedCompletionAt)}.';
+    } else {
+      extraMessage =
+      'Please confirm that this is the correct vehicle before updating.';
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: const Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: Color(0xFFFFF3E0),
+                child: Icon(
+                  Icons.warning_amber_rounded,
+                  color: Colors.orange,
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Confirm Status Change',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            'Please check the vehicle carefully.\n\n'
+                'Plate Number: $displayPlate\n'
+                'Car Model: $displayModel\n'
+                'Current Status: $currentStatus\n'
+                'New Status: $newStatus\n\n'
+                '$extraMessage',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, false);
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: newStatus == 'Completed'
+                    ? Colors.green
+                    : const Color(0xFF339BFF),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                Navigator.pop(dialogContext, true);
+              },
+              icon: const Icon(Icons.check),
+              label: Text(
+                'Confirm $displayPlate',
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    return confirmed == true;
+  }
+
   Future<void> updatePendingStatus(
       Map<String, dynamic> service,
       String newStatus, {
@@ -1530,36 +1631,38 @@ class _PendingServicePageState extends State<PendingServicePage> {
                 onChanged: isCompleted
                     ? null
                     : (value) async {
-                  if (value == null ||
-                      value == status) {
+                  if (value == null || value == status) {
                     return;
                   }
 
-                  if (value ==
-                      'In Progress') {
-                    final estimatedTime =
+                  DateTime? estimatedTime;
+
+                  if (value == 'In Progress') {
+                    estimatedTime =
                     await showEstimatedCompletionDialog(
                       service,
                     );
 
-                    if (estimatedTime ==
-                        null) {
+                    if (estimatedTime == null) {
                       return;
                     }
+                  }
 
-                    await updatePendingStatus(
-                      service,
-                      value,
-                      estimatedCompletionAt:
-                      estimatedTime,
-                    );
+                  final confirmed =
+                  await showStatusChangeConfirmation(
+                    service: service,
+                    newStatus: value,
+                    estimatedCompletionAt: estimatedTime,
+                  );
 
+                  if (!confirmed) {
                     return;
                   }
 
                   await updatePendingStatus(
                     service,
                     value,
+                    estimatedCompletionAt: estimatedTime,
                   );
                 },
               ),
