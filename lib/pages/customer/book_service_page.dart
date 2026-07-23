@@ -2809,92 +2809,94 @@ class _BookServicePageState extends State<BookServicePage>
                   ),
                 ),
               ),
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 28),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.cancel_outlined,
-                      color: Colors.red,
-                    ),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        'Cancelled Bookings',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1F2937),
-                        ),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '${displayCancelledBookings.length}',
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 12),
-            ),
-            if (displayCancelledBookings.isEmpty)
+            if (selectedFilter == 'Completed') ...[
               const SliverToBoxAdapter(
+                child: SizedBox(height: 28),
+              ),
+              SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(
+                  padding: const EdgeInsets.symmetric(
                     horizontal: 16,
-                    vertical: 20,
                   ),
-                  child: Center(
-                    child: Text(
-                      'No cancelled bookings.',
-                      style: TextStyle(
-                        color: Colors.black54,
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.cancel_outlined,
+                        color: Colors.red,
                       ),
-                    ),
-                  ),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(
-                  16,
-                  0,
-                  16,
-                  120,
-                ),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                      return buildBookingCard(
-                        displayCancelledBookings[index],
-                      );
-                    },
-                    childCount: displayCancelledBookings.length,
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Cancelled Bookings',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1F2937),
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          '${displayCancelledBookings.length}',
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
+              const SliverToBoxAdapter(
+                child: SizedBox(height: 12),
+              ),
+              if (displayCancelledBookings.isEmpty)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 20,
+                    ),
+                    child: Center(
+                      child: Text(
+                        'No cancelled bookings.',
+                        style: TextStyle(
+                          color: Colors.black54,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    16,
+                    0,
+                    16,
+                    120,
+                  ),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                        return buildBookingCard(
+                          displayCancelledBookings[index],
+                        );
+                      },
+                      childCount: displayCancelledBookings.length,
+                    ),
+                  ),
+                ),
+            ],
           ],
         ),
       ),

@@ -26,10 +26,9 @@ class AdminDashboardPage extends StatefulWidget {
 class _AdminDashboardPageState extends State<AdminDashboardPage> {
   bool isLoading = false;
 
-  int bookingCount = 0;
-  int customerCount = 0;
-  int serviceCount = 0;
-  int recordCount = 0;
+  int todayBookingCount = 0;
+  int activePendingServiceCount = 0;
+  int todayApprovedQuotationCount = 0;
 
   String selectedMonth = '';
 
@@ -146,15 +145,73 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   }
 
   Future<void> fetchDashboardCounts() async {
-    final bookingsResponse = await supabase.from('bookings').select();
-    final customersResponse = await supabase.from('customers').select();
-    final servicesResponse = await supabase.from('services').select();
-    final recordsResponse = await supabase.from('service_records').select();
+    final now = DateTime.now();
 
-    bookingCount = List<Map<String, dynamic>>.from(bookingsResponse).length;
-    customerCount = List<Map<String, dynamic>>.from(customersResponse).length;
-    serviceCount = List<Map<String, dynamic>>.from(servicesResponse).length;
-    recordCount = List<Map<String, dynamic>>.from(recordsResponse).length;
+    final today = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
+    final tomorrow = today.add(
+      const Duration(days: 1),
+    );
+
+    final todaySql =
+        '${today.year.toString().padLeft(4, '0')}-'
+        '${today.month.toString().padLeft(2, '0')}-'
+        '${today.day.toString().padLeft(2, '0')}';
+
+    final bookingsResponse = await supabase
+        .from('bookings')
+        .select('booking_id, status')
+        .eq('appointment_date', todaySql);
+
+    final pendingServicesResponse = await supabase
+        .from('pending_services')
+        .select('pending_id, status');
+
+    final approvedQuotationsResponse = await supabase
+        .from('quotations')
+        .select('quotation_id, status, updated_at')
+        .eq('status', 'Confirmed')
+        .gte(
+      'updated_at',
+      today.toUtc().toIso8601String(),
+    )
+        .lt(
+      'updated_at',
+      tomorrow.toUtc().toIso8601String(),
+    );
+
+    final todayBookings =
+    List<Map<String, dynamic>>.from(
+      bookingsResponse,
+    );
+
+    final pendingServices =
+    List<Map<String, dynamic>>.from(
+      pendingServicesResponse,
+    );
+
+    todayBookingCount = todayBookings.where((booking) {
+      final status =
+          booking['status']?.toString() ?? '';
+
+      return status != 'Cancelled' &&
+          status != 'Rejected';
+    }).length;
+
+    activePendingServiceCount =
+        pendingServices.where((service) {
+          return service['status']?.toString() !=
+              'Completed';
+        }).length;
+
+    todayApprovedQuotationCount =
+        List<Map<String, dynamic>>.from(
+          approvedQuotationsResponse,
+        ).length;
   }
 
   Future<void> fetchVehicles() async {
@@ -189,10 +246,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         .onPostgresChanges(
       event: PostgresChangeEvent.all,
       schema: 'public',
-      table: 'customers',
+      table: 'pending_services',
       callback: (payload) {
         scheduleDashboardRefresh(
-          'Customer',
+          'Pending service',
           payload.eventType,
         );
       },
@@ -200,21 +257,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         .onPostgresChanges(
       event: PostgresChangeEvent.all,
       schema: 'public',
-      table: 'services',
+      table: 'quotations',
       callback: (payload) {
         scheduleDashboardRefresh(
-          'Service',
-          payload.eventType,
-        );
-      },
-    )
-        .onPostgresChanges(
-      event: PostgresChangeEvent.all,
-      schema: 'public',
-      table: 'service_records',
-      callback: (payload) {
-        scheduleDashboardRefresh(
-          'Service record',
+          'Quotation',
           payload.eventType,
         );
       },
@@ -389,10 +435,18 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     return DateTime(year, month);
   }
 
-  void openPage(Widget page) {
-    Navigator.push(
+  Future<void> openPage(Widget page) async {
+    await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => page),
+      MaterialPageRoute(
+        builder: (_) => page,
+      ),
+    );
+
+    if (!mounted) return;
+
+    await loadDashboardData(
+      showLoading: false,
     );
   }
 
@@ -467,36 +521,74 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              sectionTitle('Overview'),
+              sectionTitle('Workshop Overview'),
               const SizedBox(height: 10),
-              SizedBox(
-                height: 96,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.055),
+                      blurRadius: 12,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
                   children: [
-                    dashboardCard(
-                      title: 'Bookings',
-                      value: '$bookingCount',
-                      icon: Icons.calendar_month,
-                      pageIndex: 1,
+                    const Text(
+                      'Today\'s workshop activity',
+                      style: TextStyle(
+                        color: Colors.black54,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    dashboardCard(
-                      title: 'Customers',
-                      value: '$customerCount',
-                      icon: Icons.people,
-                      pageIndex: 2,
-                    ),
-                    dashboardCard(
-                      title: 'Services',
-                      value: '$serviceCount',
-                      icon: Icons.build,
-                      pageIndex: 3,
-                    ),
-                    dashboardCard(
-                      title: 'Records',
-                      value: '$recordCount',
-                      icon: Icons.assignment,
-                      pageIndex: 4,
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        workshopOverviewCard(
+                          title: 'Today\'s\nBookings',
+                          value: '$todayBookingCount',
+                          icon: Icons.calendar_today,
+                          color:
+                          const Color(0xFF339BFF),
+                          onTap: () {
+                            widget.onNavigate(1);
+                          },
+                        ),
+                        const SizedBox(width: 9),
+                        workshopOverviewCard(
+                          title: 'Pending\nServices',
+                          value:
+                          '$activePendingServiceCount',
+                          icon: Icons.car_repair,
+                          color: Colors.orange,
+                          onTap: () {
+                            openPage(
+                              const PendingServicePage(),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 9),
+                        workshopOverviewCard(
+                          title: 'Approved\nToday',
+                          value:
+                          '$todayApprovedQuotationCount',
+                          icon: Icons.receipt_long,
+                          color: Colors.purple,
+                          onTap: () {
+                            openPage(
+                              const AdminQuotationsPage(),
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -718,86 +810,88 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       ),
     );
   }
-  Color getDashboardColor(String title) {
-    if (title == 'Bookings') return const Color(0xFF339BFF);
-    if (title == 'Customers') return Colors.green;
-    if (title == 'Services') return Colors.orange;
-    if (title == 'Records') return Colors.purple;
-    return const Color(0xFF339BFF);
-  }
-
-  Color getDashboardBgColor(String title) {
-    if (title == 'Bookings') return const Color(0xFFEAF4FF);
-    if (title == 'Customers') return Colors.green.shade50;
-    if (title == 'Services') return Colors.orange.shade50;
-    if (title == 'Records') return Colors.purple.shade50;
-    return const Color(0xFFEAF4FF);
-  }
-  Widget dashboardCard({
+  Widget workshopOverviewCard({
     required String title,
     required String value,
     required IconData icon,
-    required int pageIndex,
+    required Color color,
+    required VoidCallback onTap,
   }) {
-    final color = getDashboardColor(title);
-    final bgColor = getDashboardBgColor(title);
-
-    return Container(
-      width: 96,
-      margin: const EdgeInsets.only(right: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: color.withOpacity(0.14),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: color.withOpacity(0.10),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: () {
-          widget.onNavigate(pageIndex);
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircleAvatar(
-                radius: 17,
-                backgroundColor: bgColor,
-                child: Icon(
-                  icon,
+    return Expanded(
+      child: Material(
+        color: color.withOpacity(0.09),
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Container(
+            constraints: const BoxConstraints(
+              minHeight: 132,
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 9,
+              vertical: 12,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: color.withOpacity(0.20),
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment:
+              MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withOpacity(0.12),
+                        blurRadius: 7,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    icon,
+                    color: color,
+                    size: 21,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 23,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF1F2937),
+                    fontSize: 10.5,
+                    height: 1.15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Icon(
+                  Icons.arrow_forward_rounded,
                   color: color,
-                  size: 19,
+                  size: 16,
                 ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 10.5,
-                  color: Colors.black54,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

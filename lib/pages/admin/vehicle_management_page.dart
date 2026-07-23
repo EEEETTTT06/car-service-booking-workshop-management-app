@@ -27,7 +27,14 @@ class VehicleManagementPage extends StatefulWidget {
 class _VehicleManagementPageState
     extends State<VehicleManagementPage> {
   String searchText = '';
+  String selectedVehicleColumn = 'Verified';
   bool isLoading = false;
+
+  final List<String> vehicleColumns = const [
+    'Verified',
+    'Pending Claim',
+    'Rejected',
+  ];
 
   final TextEditingController
   searchController =
@@ -332,17 +339,62 @@ class _VehicleManagementPageState
     return List<Map<String, dynamic>>.from(response);
   }
 
+  bool matchesVehicleColumn(
+      Map<String, dynamic> vehicle,
+      String column,
+      ) {
+    final status =
+        vehicle['verification_status']
+            ?.toString()
+            .trim() ??
+            'Verified';
+
+    return status == column;
+  }
+
   List<Map<String, dynamic>> get filteredVehicles {
+    final search = searchText.trim().toLowerCase();
+
     return vehicles.where((vehicle) {
-      final plate = (vehicle['plate_number'] ?? '').toString().toLowerCase();
-      final model = (vehicle['car_model'] ?? '').toString().toLowerCase();
-      final owner = (vehicle['customer_name'] ?? '').toString().toLowerCase();
-      final search = searchText.toLowerCase();
+      if (!matchesVehicleColumn(
+        vehicle,
+        selectedVehicleColumn,
+      )) {
+        return false;
+      }
+
+      final plate =
+      (vehicle['plate_number'] ?? '')
+          .toString()
+          .toLowerCase();
+
+      final model =
+      (vehicle['car_model'] ?? '')
+          .toString()
+          .toLowerCase();
+
+      final owner =
+      (vehicle['customer_name'] ?? '')
+          .toString()
+          .toLowerCase();
+
+      if (search.isEmpty) {
+        return true;
+      }
 
       return plate.contains(search) ||
           model.contains(search) ||
           owner.contains(search);
     }).toList();
+  }
+
+  int getVehicleColumnCount(String column) {
+    return vehicles.where((vehicle) {
+      return matchesVehicleColumn(
+        vehicle,
+        column,
+      );
+    }).length;
   }
 
   Color getStatusColor(String status) {
@@ -2390,116 +2442,539 @@ class _VehicleManagementPageState
     );
   }
 
+  Color getVehicleStatusBackgroundColor(String status) {
+    if (status == 'Verified') return Colors.green.shade50;
+    if (status == 'Pending Claim') return Colors.orange.shade50;
+    if (status == 'Rejected') return Colors.red.shade50;
+    return Colors.grey.shade100;
+  }
+
+  String getVehicleStatusDescription(String status) {
+    if (status == 'Verified') return 'Ownership verified';
+    if (status == 'Pending Claim') {
+      return 'Customer claim requires Admin review';
+    }
+    if (status == 'Rejected') return 'Vehicle claim was rejected';
+    return 'Ownership not verified';
+  }
+
+  Widget buildVehicleInformationLine({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    final displayValue = value.trim().isEmpty
+        ? 'Not Provided'
+        : value.trim();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: const Color(0xFF339BFF),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 2,
+          child: Text(
+            displayValue,
+            textAlign: TextAlign.right,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF1F2937),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget buildVehicleCard(Map<String, dynamic> vehicle) {
-    final status = vehicle['verification_status'] ?? 'Verified';
-    final owner = vehicle['customer_name'] ?? '';
+    final status = vehicle['verification_status']
+        ?.toString()
+        .trim() ??
+        'Verified';
+
+    final plate = vehicle['plate_number']
+        ?.toString()
+        .trim() ??
+        '';
+
+    final model = vehicle['car_model']
+        ?.toString()
+        .trim() ??
+        '';
+
+    final owner = vehicle['customer_name']
+        ?.toString()
+        .trim() ??
+        '';
+
+    final customer = vehicle['customers'];
+
+    final email = customer is Map
+        ? customer['email']?.toString().trim() ?? ''
+        : '';
+
+    final phone = customer is Map
+        ? customer['phone']?.toString().trim() ?? ''
+        : '';
+
+    final statusColor = getStatusColor(status);
+    final isPendingClaim = status == 'Pending Claim';
+    final isVerified = status == 'Verified';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: statusColor.withOpacity(
+            isPendingClaim ? 0.35 : 0.14,
+          ),
+          width: isPendingClaim ? 1.4 : 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 15,
-            offset: const Offset(0, 6),
+            color: statusColor.withOpacity(0.08),
+            blurRadius: 13,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: () {
-          showVehicleDetailDialog(vehicle);
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: [
-              const CircleAvatar(
-                radius: 30,
-                backgroundColor: Color(0xFFD7E5FA),
-                child: Icon(
-                  Icons.directions_car,
-                  color: Color(0xFF339BFF),
-                  size: 32,
-                ),
+      child: Column(
+        children: [
+          InkWell(
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(22),
+              topRight: Radius.circular(22),
+            ),
+            onTap: () {
+              showVehicleDetailDialog(vehicle);
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                14,
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: double.infinity,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '${vehicle['plate_number'] ?? ''} • ${vehicle['car_model'] ?? ''}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1F2937),
-                          ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 54,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD7E5FA),
+                          borderRadius: BorderRadius.circular(17),
+                        ),
+                        child: const Icon(
+                          Icons.directions_car,
+                          color: Color(0xFF339BFF),
+                          size: 29,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.person_outline,
-                          size: 17,
-                          color: Colors.black45,
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              plate.isEmpty
+                                  ? 'NO PLATE NUMBER'
+                                  : plate,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFF1F2937),
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              model.isEmpty
+                                  ? 'Car model not provided'
+                                  : model,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.black54,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            owner.toString().isEmpty
-                                ? 'No Customer Assigned'
-                                : owner.toString(),
-                            style: const TextStyle(
-                              color: Colors.black54,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: getVehicleStatusBackgroundColor(
+                            status,
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              getStatusIcon(status),
+                              size: 14,
+                              color: statusColor,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              status,
+                              style: TextStyle(
+                                color: statusColor,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  if (isPendingClaim) ...[
+                    const SizedBox(height: 13),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Colors.orange.withOpacity(0.25),
+                        ),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.fact_check_outlined,
+                            color: Colors.orange,
+                            size: 20,
+                          ),
+                          SizedBox(width: 9),
+                          Expanded(
+                            child: Text(
+                              'Customer claim requires Admin review.',
+                              style: TextStyle(
+                                color: Colors.orange,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: getStatusColor(status).withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(30),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      getStatusIcon(status),
-                      size: 15,
-                      color: getStatusColor(status),
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      status,
-                      style: TextStyle(
-                        color: getStatusColor(status),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
+                        ],
                       ),
                     ),
                   ],
+
+                  const SizedBox(height: 14),
+
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(13),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF7F9FC),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      children: [
+                        buildVehicleInformationLine(
+                          icon: Icons.person_outline,
+                          title: 'Owner',
+                          value: owner.isEmpty
+                              ? 'No Customer Assigned'
+                              : owner,
+                        ),
+                        if (phone.isNotEmpty) ...[
+                          const SizedBox(height: 11),
+                          const Divider(height: 1),
+                          const SizedBox(height: 11),
+                          buildVehicleInformationLine(
+                            icon: Icons.phone_outlined,
+                            title: 'Phone',
+                            value: phone,
+                          ),
+                        ],
+                        if (email.isNotEmpty) ...[
+                          const SizedBox(height: 11),
+                          const Divider(height: 1),
+                          const SizedBox(height: 11),
+                          buildVehicleInformationLine(
+                            icon: Icons.email_outlined,
+                            title: 'Email',
+                            value: email,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Icon(
+                        isVerified
+                            ? Icons.verified_user
+                            : isPendingClaim
+                            ? Icons.pending_actions
+                            : Icons.info_outline,
+                        color: statusColor,
+                        size: 17,
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          getVehicleStatusDescription(status),
+                          style: TextStyle(
+                            color: statusColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: Colors.black38,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              12,
+              11,
+              12,
+              12,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF339BFF),
+                      side: const BorderSide(
+                        color: Color(0xFF339BFF),
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: () {
+                      showVehicleDetailDialog(vehicle);
+                    },
+                    icon: const Icon(
+                      Icons.visibility_outlined,
+                      size: 18,
+                    ),
+                    label: const Text('View Details'),
+                  ),
+                ),
+                const SizedBox(width: 9),
+                if (isPendingClaim)
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: () {
+                        showVehicleDetailDialog(vehicle);
+                      },
+                      icon: const Icon(
+                        Icons.fact_check_outlined,
+                        size: 18,
+                      ),
+                      label: const Text('Review Claim'),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF339BFF),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: () {
+                        showEditVehicleDialog(vehicle);
+                      },
+                      icon: const Icon(
+                        Icons.edit_outlined,
+                        size: 18,
+                      ),
+                      label: const Text('Edit Vehicle'),
+                    ),
+                  ),
+                const SizedBox(width: 7),
+                IconButton(
+                  tooltip: 'Delete Vehicle',
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.red.shade50,
+                    foregroundColor: Colors.red,
+                  ),
+                  onPressed: () {
+                    final vehicleId = vehicle['vehicle_id']
+                        ?.toString()
+                        .trim() ??
+                        '';
+
+                    showDeleteVehicleDialog(vehicleId);
+                  },
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildVehicleColumnButton(
+      String column,
+      ) {
+    final isSelected =
+        selectedVehicleColumn == column;
+
+    final color = getStatusColor(column);
+
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          if (selectedVehicleColumn == column) {
+            return;
+          }
+
+          setState(() {
+            selectedVehicleColumn = column;
+          });
+
+          if (scrollController.hasClients) {
+            scrollController.animateTo(
+              0,
+              duration: const Duration(
+                milliseconds: 350,
+              ),
+              curve: Curves.easeOut,
+            );
+          }
+        },
+        child: AnimatedContainer(
+          duration: const Duration(
+            milliseconds: 220,
+          ),
+          height: 76,
+          padding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 9,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? color
+                : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected
+                  ? color
+                  : color.withOpacity(0.18),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(
+                  isSelected ? 0.18 : 0.06,
+                ),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment:
+            MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment:
+                MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    getStatusIcon(column),
+                    color: isSelected
+                        ? Colors.white
+                        : color,
+                    size: 17,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${getVehicleColumnCount(column)}',
+                    style: TextStyle(
+                      color: isSelected
+                          ? Colors.white
+                          : color,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                column,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: isSelected
+                      ? Colors.white
+                      : const Color(0xFF1F2937),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
@@ -2675,13 +3150,97 @@ class _VehicleManagementPageState
                 ),
               ),
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 16),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+                child: Row(
+                  children: vehicleColumns
+                      .asMap()
+                      .entries
+                      .expand((entry) {
+                    final widgets = <Widget>[
+                      buildVehicleColumnButton(
+                        entry.value,
+                      ),
+                    ];
+
+                    if (entry.key <
+                        vehicleColumns.length - 1) {
+                      widgets.add(
+                        const SizedBox(width: 8),
+                      );
+                    }
+
+                    return widgets;
+                  }).toList(),
+                ),
+              ),
+            ),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 16),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  12,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '$selectedVehicleColumn Vehicles',
+                        style: const TextStyle(
+                          color: Color(0xFF1F2937),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${displayVehicles.length} vehicle(s)',
+                        style: const TextStyle(
+                          color: Color(0xFF339BFF),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             if (displayVehicles.isEmpty)
-              const SliverFillRemaining(
+              SliverFillRemaining(
+                hasScrollBody: false,
                 child: Center(
-                  child: Text(
-                    'No vehicles found.',
-                    style: TextStyle(fontSize: 16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No $selectedVehicleColumn vehicle found.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
               )

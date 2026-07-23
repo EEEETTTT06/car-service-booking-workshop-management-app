@@ -18,7 +18,9 @@ class PendingServicePage extends StatefulWidget {
 
 class _PendingServicePageState extends State<PendingServicePage> {
   String searchText = '';
+  String selectedStatusColumn = 'Waiting Fix';
   bool isLoading = false;
+
 
   final ScrollController scrollController = ScrollController();
   bool showBackToTop = false;
@@ -243,19 +245,70 @@ class _PendingServicePageState extends State<PendingServicePage> {
     }
   }
 
+  bool matchesStatusColumn(
+      Map<String, dynamic> service,
+      String column,
+      ) {
+    final status =
+        service['status']?.toString().trim() ?? '';
+
+    if (column == 'Waiting Fix') {
+      return status == 'Waiting Fix' ||
+          status == 'Waiting Arrived';
+    }
+
+    return status == column;
+  }
+
   List<Map<String, dynamic>> get filteredCars {
+    final search = searchText.trim().toLowerCase();
+
     return pendingServices.where((service) {
-      final vehicle = service['vehicles'] ?? {};
-      final plate = (vehicle['plate_number'] ?? '').toString().toLowerCase();
-      final model = (vehicle['car_model'] ?? '').toString().toLowerCase();
+      if (!matchesStatusColumn(
+        service,
+        selectedStatusColumn,
+      )) {
+        return false;
+      }
+
+      final vehicle =
+          service['vehicles'] ?? <String, dynamic>{};
+
       final customer =
-      (service['customers']?['name'] ?? '').toString().toLowerCase();
-      final search = searchText.toLowerCase();
+          service['customers'] ?? <String, dynamic>{};
+
+      final plate =
+      (vehicle['plate_number'] ?? '')
+          .toString()
+          .toLowerCase();
+
+      final model =
+      (vehicle['car_model'] ?? '')
+          .toString()
+          .toLowerCase();
+
+      final customerName =
+      (customer['name'] ?? '')
+          .toString()
+          .toLowerCase();
+
+      if (search.isEmpty) {
+        return true;
+      }
 
       return plate.contains(search) ||
           model.contains(search) ||
-          customer.contains(search);
+          customerName.contains(search);
     }).toList();
+  }
+
+  int getStatusColumnCount(String column) {
+    return pendingServices.where((service) {
+      return matchesStatusColumn(
+        service,
+        column,
+      );
+    }).length;
   }
 
   int getCompletedCount() {
@@ -1166,6 +1219,123 @@ class _PendingServicePageState extends State<PendingServicePage> {
     );
   }
 
+  IconData getStatusColumnIcon(String column) {
+    if (column == 'Waiting Fix') {
+      return Icons.pending_actions;
+    }
+
+    if (column == 'In Progress') {
+      return Icons.build_circle_outlined;
+    }
+
+    return Icons.check_circle_outline;
+  }
+
+  Widget buildStatusColumnButton(String column) {
+    final isSelected =
+        selectedStatusColumn == column;
+
+    final color = getStatusColor(column);
+
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          if (selectedStatusColumn == column) {
+            return;
+          }
+
+          setState(() {
+            selectedStatusColumn = column;
+          });
+
+          if (scrollController.hasClients) {
+            scrollController.animateTo(
+              0,
+              duration: const Duration(
+                milliseconds: 350,
+              ),
+              curve: Curves.easeOut,
+            );
+          }
+        },
+        child: AnimatedContainer(
+          duration: const Duration(
+            milliseconds: 220,
+          ),
+          height: 76,
+          padding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 9,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? color
+                : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected
+                  ? color
+                  : color.withOpacity(0.18),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(
+                  isSelected ? 0.18 : 0.06,
+                ),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment:
+            MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment:
+                MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    getStatusColumnIcon(column),
+                    color: isSelected
+                        ? Colors.white
+                        : color,
+                    size: 17,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${getStatusColumnCount(column)}',
+                    style: TextStyle(
+                      color: isSelected
+                          ? Colors.white
+                          : color,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                column,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: isSelected
+                      ? Colors.white
+                      : const Color(0xFF1F2937),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget buildSummaryCard({
     required IconData icon,
     required String title,
@@ -1212,38 +1382,196 @@ class _PendingServicePageState extends State<PendingServicePage> {
     );
   }
 
-  Widget buildPendingDetailRow(
-      String title,
-      String value,
-      ) {
+  Widget buildDialogSection({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.035),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF4FF),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  size: 19,
+                  color: const Color(0xFF339BFF),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF1F2937),
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget buildDialogInformationRow({
+    required IconData icon,
+    required String title,
+    required String value,
+    bool showDivider = true,
+  }) {
+    final displayValue =
+    value.trim().isEmpty ? 'Not Provided' : value.trim();
+
+    return Column(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: Colors.black45,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 4,
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 6,
+              child: Text(
+                displayValue,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  color: Color(0xFF1F2937),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.bold,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (showDivider) ...[
+          const SizedBox(height: 11),
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+          const SizedBox(height: 11),
+        ],
+      ],
+    );
+  }
+
+  Widget buildQuotationItemCard(
+      Map<dynamic, dynamic> item,
+      ) {
+    final quantity =
+        int.tryParse(
+          item['quantity']?.toString() ?? '',
+        ) ??
+            1;
+
+    final price =
+        double.tryParse(
+          item['price']?.toString() ?? '',
+        ) ??
+            0;
+
+    final subtotal = quantity * price;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 9),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F7FA),
+        color: const Color(0xFFF7F9FC),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: Colors.black54,
-                fontWeight: FontWeight.w500,
-              ),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEAF4FF),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: const Icon(
+              Icons.build_outlined,
+              color: Color(0xFF339BFF),
+              size: 19,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 11),
           Expanded(
-            child: Text(
-              value.trim().isEmpty ? 'Not Provided' : value,
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item['item_name']?.toString() ??
+                      'Service Item',
+                  style: const TextStyle(
+                    color: Color(0xFF1F2937),
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Qty $quantity  ×  RM ${price.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'RM ${subtotal.toStringAsFixed(2)}',
+            style: const TextStyle(
+              color: Color(0xFF339BFF),
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ],
@@ -1254,550 +1582,1050 @@ class _PendingServicePageState extends State<PendingServicePage> {
   void showPendingServiceDetailDialog(
       Map<String, dynamic> service,
       ) {
-    final vehicle = service['vehicles'] ?? {};
-    final customer = service['customers'] ?? {};
+    final vehicle =
+        service['vehicles'] ?? <String, dynamic>{};
+
+    final customer =
+        service['customers'] ?? <String, dynamic>{};
+
     final quotation = service['quotations'];
 
     final items =
-        quotation?['quotation_items'] as List? ?? [];
+        quotation?['quotation_items'] as List? ??
+            [];
 
-    final total = quotation == null
-        ? 0.0
-        : double.tryParse(
-      quotation['total']?.toString() ?? '',
-    ) ??
-        calculateItemsTotal(items);
+    final itemTotal = calculateItemsTotal(items);
+
+    final storedTotal =
+    double.tryParse(
+      quotation?['total']?.toString() ?? '',
+    );
+
+    final total =
+    storedTotal == null ||
+        (storedTotal <= 0 && itemTotal > 0)
+        ? itemTotal
+        : storedTotal;
+
+    final plate =
+        vehicle['plate_number']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final model =
+        vehicle['car_model']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final status =
+        service['status']
+            ?.toString()
+            .trim() ??
+            'Waiting Fix';
+
+    final serviceType =
+        service['service_type']
+            ?.toString()
+            .trim() ??
+            'Walk-in';
+
+    final problem =
+    quotation?['problem_description']
+        ?.toString()
+        .trim()
+        .isNotEmpty ==
+        true
+        ? quotation!['problem_description'].toString()
+        : service['note']?.toString() ??
+        'No description';
 
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
+      builder: (dialogContext) {
+        return Dialog(
           insetPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 30,
+            horizontal: 16,
+            vertical: 24,
           ),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(26),
           ),
-          title: const Text(
-            'Pending Service Details',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 470,
+              maxHeight:
+              MediaQuery.of(dialogContext).size.height *
+                  0.88,
             ),
-          ),
-          content: SizedBox(
-            width: 430,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  buildPendingDetailRow(
-                    'Plate Number',
-                    vehicle['plate_number']?.toString() ?? '',
+            child: Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(
+                    18,
+                    16,
+                    10,
+                    16,
                   ),
-                  buildPendingDetailRow(
-                    'Car Model',
-                    vehicle['car_model']?.toString() ?? '',
-                  ),
-                  buildPendingDetailRow(
-                    'Customer',
-                    customer['name']?.toString() ?? '',
-                  ),
-                  buildPendingDetailRow(
-                    'Phone',
-                    customer['phone']?.toString() ?? '',
-                  ),
-                  buildPendingDetailRow(
-                    'Service Type',
-                    service['service_type']?.toString() ??
-                        'Walk-in',
-                  ),
-                  buildPendingDetailRow(
-                    'Service Status',
-                    service['status']?.toString() ??
-                        'Waiting Fix',
-                  ),
-                  if (service['estimated_completion_at'] != null)
-                    buildPendingDetailRow(
-                      'Estimated Completion',
-                      formatStoredDateTime(
-                        service['estimated_completion_at'],
-                      ),
-                    ),
-                  buildPendingDetailRow(
-                    'Problem',
-                    quotation?['problem_description']
-                        ?.toString() ??
-                        service['note']?.toString() ??
-                        'No description',
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  const Text(
-                    'Quotation Information',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Color(0xFF248CF2),
+                        Color(0xFF63B3FF),
+                      ],
                     ),
                   ),
-
-                  const SizedBox(height: 10),
-
-                  if (quotation == null)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade50,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Text(
-                        'No quotation is linked to this service.',
-                        style: TextStyle(
-                          color: Colors.orange,
-                          fontWeight: FontWeight.bold,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: const Icon(
+                          Icons.car_repair,
+                          color: Colors.white,
+                          size: 28,
                         ),
                       ),
-                    )
-                  else ...[
-                    buildPendingDetailRow(
-                      'Quotation Status',
-                      quotation['status']?.toString() ?? '',
-                    ),
-                    buildPendingDetailRow(
-                      'Quotation Total',
-                      'RM ${total.toStringAsFixed(2)}',
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    const Text(
-                      'Quotation Items',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              plate.isEmpty
+                                  ? 'Pending Service Details'
+                                  : plate,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              model.isEmpty
+                                  ? 'Pending Service Details'
+                                  : model,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    if (items.isEmpty)
-                      const Text('No quotation items found.')
-                    else
-                      ...items.map((item) {
-                        final quantity = int.tryParse(
-                          item['quantity'].toString(),
-                        ) ??
-                            1;
-
-                        final price = double.tryParse(
-                          item['price'].toString(),
-                        ) ??
-                            0;
-
-                        final subtotal = quantity * price;
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF5F7FA),
-                            borderRadius: BorderRadius.circular(14),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          status,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
                           ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '${item['item_name'] ?? 'Item'}\n'
-                                      'Qty: $quantity × RM ${price.toStringAsFixed(2)}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () {
+                          Navigator.pop(dialogContext);
+                        },
+                        icon: const Icon(
+                          Icons.close,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        buildDialogSection(
+                          icon: Icons.person_outline,
+                          title: 'Customer Information',
+                          children: [
+                            buildDialogInformationRow(
+                              icon: Icons.person,
+                              title: 'Customer Name',
+                              value:
+                              customer['name']?.toString() ??
+                                  '',
+                            ),
+                            buildDialogInformationRow(
+                              icon: Icons.phone_outlined,
+                              title: 'Phone Number',
+                              value:
+                              customer['phone']?.toString() ??
+                                  '',
+                            ),
+                            buildDialogInformationRow(
+                              icon: Icons.email_outlined,
+                              title: 'Email Address',
+                              value:
+                              customer['email']?.toString() ??
+                                  '',
+                              showDivider: false,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 13),
+                        buildDialogSection(
+                          icon: Icons.settings_suggest_outlined,
+                          title: 'Service Information',
+                          children: [
+                            buildDialogInformationRow(
+                              icon: Icons.category_outlined,
+                              title: 'Service Type',
+                              value: serviceType,
+                            ),
+                            buildDialogInformationRow(
+                              icon: Icons.timeline,
+                              title: 'Current Status',
+                              value: status,
+                            ),
+                            buildDialogInformationRow(
+                              icon: Icons.access_time,
+                              title: 'Queue Created',
+                              value: formatStoredDateTime(
+                                service['created_at'],
+                              ),
+                            ),
+                            buildDialogInformationRow(
+                              icon: Icons.schedule,
+                              title: 'Estimated Completion',
+                              value: formatStoredDateTime(
+                                service[
+                                'estimated_completion_at'],
+                              ),
+                            ),
+                            buildDialogInformationRow(
+                              icon: Icons.notes_outlined,
+                              title: 'Problem / Notes',
+                              value: problem,
+                              showDivider: false,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 13),
+                        buildDialogSection(
+                          icon: Icons.receipt_long_outlined,
+                          title: 'Quotation Information',
+                          children: [
+                            if (quotation == null)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(13),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.shade50,
+                                  borderRadius:
+                                  BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: Colors.orange
+                                        .withOpacity(0.25),
                                   ),
                                 ),
+                                child: const Row(
+                                  crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      Icons.info_outline,
+                                      color: Colors.orange,
+                                      size: 20,
+                                    ),
+                                    SizedBox(width: 9),
+                                    Expanded(
+                                      child: Text(
+                                        'No quotation is currently linked to this service.',
+                                        style: TextStyle(
+                                          color: Colors.orange,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else ...[
+                              buildDialogInformationRow(
+                                icon: Icons.verified_outlined,
+                                title: 'Quotation Status',
+                                value:
+                                quotation['status']
+                                    ?.toString() ??
+                                    '',
                               ),
-                              Text(
-                                'RM ${subtotal.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  color: Color(0xFF339BFF),
-                                  fontWeight: FontWeight.bold,
+                              if (items.isEmpty)
+                                Container(
+                                  width: double.infinity,
+                                  padding:
+                                  const EdgeInsets.all(13),
+                                  decoration: BoxDecoration(
+                                    color:
+                                    Colors.grey.shade100,
+                                    borderRadius:
+                                    BorderRadius.circular(14),
+                                  ),
+                                  child: const Text(
+                                    'No quotation items found.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.black54,
+                                      fontSize: 12.5,
+                                    ),
+                                  ),
+                                )
+                              else
+                                ...items.map(
+                                      (item) =>
+                                      buildQuotationItemCard(
+                                        item as Map<dynamic, dynamic>,
+                                      ),
+                                ),
+                              const SizedBox(height: 4),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 13,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEAF4FF),
+                                  borderRadius:
+                                  BorderRadius.circular(14),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Expanded(
+                                      child: Text(
+                                        'Quotation Total',
+                                        style: TextStyle(
+                                          color: Color(0xFF1F2937),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      'RM ${total.toStringAsFixed(2)}',
+                                      style: const TextStyle(
+                                        color: Color(0xFF339BFF),
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
-                          ),
-                        );
-                      }),
-                  ],
-                ],
-              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(
+                    16,
+                    12,
+                    16,
+                    16,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      top: BorderSide(
+                        color: Colors.grey.shade200,
+                      ),
+                    ),
+                  ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                        const Color(0xFF339BFF),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 13,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                      },
+                      icon: const Icon(Icons.check),
+                      label: const Text(
+                        'Done',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
         );
       },
     );
   }
 
-  Widget buildPendingServiceCard(Map<String, dynamic> service) {
-    final vehicle = service['vehicles'] ?? {};
-    final customer = service['customers'] ?? {};
+  Widget buildServiceBadge({
+    required String label,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: color.withOpacity(0.20),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 15,
+            color: color,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildServiceInformationRow({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: const Color(0xFF339BFF),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            value.trim().isEmpty ? 'Not Provided' : value,
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+              color: Color(0xFF1F2937),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void handleDeletePendingService(
+      Map<String, dynamic> service,
+      ) {
+    final status =
+        service['status']?.toString() ??
+            'Waiting Fix';
+
+    final hasQuotation =
+        service['quotation_id'] != null;
+
+    if (hasQuotation) {
+      showMessage(
+        'Cancel or unlink the quotation before deleting this pending service.',
+      );
+      return;
+    }
+
+    if (status == 'In Progress') {
+      showMessage(
+        'An in-progress service cannot be deleted.',
+      );
+      return;
+    }
+
+    if (status == 'Completed') {
+      showMessage(
+        'Create the service record before removing this completed service.',
+      );
+      return;
+    }
+
+    showDeletePendingServiceDialog(
+      service,
+    );
+  }
+
+  Widget buildPendingServiceCard(
+      Map<String, dynamic> service,
+      ) {
+    final vehicle =
+        service['vehicles'] ?? <String, dynamic>{};
+
+    final customer =
+        service['customers'] ?? <String, dynamic>{};
+
     final quotation = service['quotations'];
 
     final status =
         service['status']?.toString() ??
             'Waiting Fix';
 
+    final plate =
+        vehicle['plate_number']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final model =
+        vehicle['car_model']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final customerName =
+        customer['name']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final customerPhone =
+        customer['phone']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final type =
+        service['service_type']
+            ?.toString()
+            .trim() ??
+            'Walk-in';
+
     final estimatedCompletionText =
     formatStoredDateTime(
       service['estimated_completion_at'],
     );
 
-    final plate = vehicle['plate_number'] ?? '';
-    final model = vehicle['car_model'] ?? '';
-    final customerName = customer['name'] ?? 'Not Provided';
-    final type = service['service_type'] ?? 'Walk-in';
+    final createdAtText =
+    formatStoredDateTime(
+      service['created_at'],
+    );
 
-    final quotationId = service['quotation_id'];
-    final hasQuotation = quotationId != null;
-    final isCompleted = status == 'Completed';
+    final hasQuotation =
+        service['quotation_id'] != null;
+
+    final isCompleted =
+        status == 'Completed';
+
+    final quotationStatus =
+        quotation?['status']
+            ?.toString()
+            .trim() ??
+            'Not Created';
+
+    final quotationItems =
+        quotation?['quotation_items'] as List? ??
+            [];
+
+    final itemsTotal =
+    calculateItemsTotal(
+      quotationItems,
+    );
+
+    final storedTotal =
+    double.tryParse(
+      quotation?['total']?.toString() ?? '',
+    );
+
+    final quotationTotal =
+    storedTotal == null ||
+        (storedTotal <= 0 &&
+            itemsTotal > 0)
+        ? itemsTotal
+        : storedTotal;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsets.only(
+        bottom: 16,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: getStatusColor(status)
+              .withOpacity(0.12),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.055),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () {
-          showPendingServiceDetailDialog(service);
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 26,
-                    backgroundColor: Color(0xFFD7E5FA),
-                    child: Icon(
-                      Icons.car_repair,
-                      color: Color(0xFF339BFF),
-                      size: 28,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '$plate - $model',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          'Customer: $customerName',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.black54,
-                            fontSize: 13,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Type: $type',
-                          style: const TextStyle(
-                            color: Colors.black54,
-                            fontSize: 13,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          hasQuotation
-                              ? 'Quotation: ${quotation?['status'] ?? 'Linked'}'
-                              : 'Quotation: Not Created',
-                          style: TextStyle(
-                            color: hasQuotation
-                                ? Colors.purple
-                                : Colors.orange,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Delete Pending Service',
-                    icon: const Icon(
-                      Icons.delete_outline,
-                      color: Colors.red,
-                    ),
-                    onPressed: () {
-                      if (hasQuotation) {
-                        showMessage(
-                          'Cancel or unlink the quotation before deleting this pending service.',
-                        );
-                        return;
-                      }
-
-                      if (status == 'In Progress') {
-                        showMessage(
-                          'An in-progress service cannot be deleted.',
-                        );
-                        return;
-                      }
-
-                      if (status == 'Completed') {
-                        showMessage(
-                          'Create the service record before removing this completed service.',
-                        );
-                        return;
-                      }
-
-                      showDeletePendingServiceDialog(
-                        service,
-                      );
-                    },
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 14),
-
-              DropdownButtonFormField<String>(
-                value: statusList.contains(status)
-                    ? status
-                    : null,
-                isExpanded: true,
-                decoration: InputDecoration(
-                  labelText: 'Service Status',
-                  floatingLabelBehavior:
-                  FloatingLabelBehavior.always,
-                  prefixIcon:
-                  const Icon(Icons.update),
-                  filled: true,
-                  fillColor:
-                  Colors.grey.shade100,
-                  border: OutlineInputBorder(
-                    borderRadius:
-                    BorderRadius.circular(16),
-                    borderSide:
-                    BorderSide.none,
-                  ),
-                ),
-                items: statusList.map(
-                      (itemStatus) {
-                    final isWaitingArrival =
-                        itemStatus ==
-                            'Waiting Arrived';
-
-                    return DropdownMenuItem<
-                        String>(
-                      value: itemStatus,
-                      enabled:
-                      !isWaitingArrival,
-                      child: Text(
-                        itemStatus,
-                        style: TextStyle(
-                          color: isWaitingArrival
-                              ? Colors.black38
-                              : null,
-                        ),
-                      ),
-                    );
-                  },
-                ).toList(),
-                onChanged: isCompleted
-                    ? null
-                    : (value) async {
-                  if (value == null || value == status) {
-                    return;
-                  }
-
-                  DateTime? estimatedTime;
-
-                  if (value == 'In Progress') {
-                    estimatedTime =
-                    await showEstimatedCompletionDialog(
-                      service,
-                    );
-
-                    if (estimatedTime == null) {
-                      return;
-                    }
-                  }
-
-                  final confirmed =
-                  await showStatusChangeConfirmation(
-                    service: service,
-                    newStatus: value,
-                    estimatedCompletionAt: estimatedTime,
-                  );
-
-                  if (!confirmed) {
-                    return;
-                  }
-
-                  await updatePendingStatus(
-                    service,
-                    value,
-                    estimatedCompletionAt: estimatedTime,
-                  );
-                },
-              ),
-
-              if (estimatedCompletionText !=
-                  'Not Set') ...[
-                const SizedBox(height: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
                 Container(
-                  width: double.infinity,
-                  padding:
-                  const EdgeInsets.all(13),
+                  width: 52,
+                  height: 52,
                   decoration: BoxDecoration(
                     color:
-                    Colors.blue.shade50,
+                    const Color(0xFFD7E5FA),
                     borderRadius:
-                    BorderRadius.circular(15),
-                    border: Border.all(
-                      color: Colors.blue
-                          .withOpacity(0.25),
-                    ),
+                    BorderRadius.circular(16),
                   ),
-                  child: Row(
+                  child: const Icon(
+                    Icons.car_repair,
+                    color: Color(0xFF339BFF),
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        Icons.schedule,
-                        color: Colors.blue,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          'Estimated Completion',
-                          style: TextStyle(
-                            color: Colors.black54,
-                            fontWeight:
-                            FontWeight.w600,
-                            fontSize: 12,
-                          ),
+                      Text(
+                        plate.isEmpty
+                            ? 'NO PLATE NUMBER'
+                            : plate,
+                        maxLines: 1,
+                        overflow:
+                        TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF1F2937),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          estimatedCompletionText,
-                          textAlign:
-                          TextAlign.right,
-                          style: const TextStyle(
-                            color: Colors.blue,
-                            fontWeight:
-                            FontWeight.bold,
-                            fontSize: 12,
-                          ),
+                      const SizedBox(height: 4),
+                      Text(
+                        model.isEmpty
+                            ? 'Car model not provided'
+                            : model,
+                        maxLines: 1,
+                        overflow:
+                        TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-
-              const SizedBox(height: 12),
-
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: getStatusBackgroundColor(status),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                  const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color:
+                    getStatusBackgroundColor(
                       status,
-                      style: TextStyle(
-                        color: getStatusColor(status),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                      ),
+                    ),
+                    borderRadius:
+                    BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(
+                      color:
+                      getStatusColor(status),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10.5,
                     ),
                   ),
-                  const Spacer(),
-                  if (!hasQuotation && !isCompleted)
-                    ElevatedButton.icon(
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                buildServiceBadge(
+                  label: type,
+                  icon: type.toLowerCase() ==
+                      'walk-in'
+                      ? Icons.directions_walk
+                      : Icons.calendar_month,
+                  color:
+                  const Color(0xFF339BFF),
+                ),
+                buildServiceBadge(
+                  label: hasQuotation
+                      ? 'Quotation $quotationStatus'
+                      : 'Quotation Not Created',
+                  icon: Icons.receipt_long,
+                  color: hasQuotation
+                      ? Colors.purple
+                      : Colors.orange,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color:
+                const Color(0xFFF7F9FC),
+                borderRadius:
+                BorderRadius.circular(16),
+              ),
+              child: Column(
+                children: [
+                  buildServiceInformationRow(
+                    icon: Icons.person_outline,
+                    title: 'Customer',
+                    value: customerName,
+                  ),
+                  const SizedBox(height: 11),
+                  const Divider(height: 1),
+                  const SizedBox(height: 11),
+                  buildServiceInformationRow(
+                    icon: Icons.phone_outlined,
+                    title: 'Phone',
+                    value: customerPhone,
+                  ),
+                  const SizedBox(height: 11),
+                  const Divider(height: 1),
+                  const SizedBox(height: 11),
+                  buildServiceInformationRow(
+                    icon: Icons.access_time,
+                    title: 'Queue Created',
+                    value: createdAtText,
+                  ),
+                  if (hasQuotation) ...[
+                    const SizedBox(height: 11),
+                    const Divider(height: 1),
+                    const SizedBox(height: 11),
+                    buildServiceInformationRow(
+                      icon:
+                      Icons.payments_outlined,
+                      title: 'Quotation Total',
+                      value:
+                      'RM ${quotationTotal.toStringAsFixed(2)}',
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            const Row(
+              children: [
+                Icon(
+                  Icons.timeline,
+                  color: Color(0xFF339BFF),
+                  size: 20,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Service Progress',
+                  style: TextStyle(
+                    color: Color(0xFF1F2937),
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            DropdownButtonFormField<String>(
+              value: statusList.contains(status)
+                  ? status
+                  : null,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: 'Update Status',
+                floatingLabelBehavior:
+                FloatingLabelBehavior.always,
+                prefixIcon: Icon(
+                  Icons.sync,
+                  color:
+                  getStatusColor(status),
+                ),
+                filled: true,
+                fillColor:
+                getStatusBackgroundColor(
+                  status,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius:
+                  BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              items: statusList.map(
+                    (itemStatus) {
+                  final isWaitingArrival =
+                      itemStatus ==
+                          'Waiting Arrived';
+
+                  return DropdownMenuItem<String>(
+                    value: itemStatus,
+                    enabled: !isWaitingArrival,
+                    child: Text(
+                      itemStatus,
+                      style: TextStyle(
+                        color: isWaitingArrival
+                            ? Colors.black38
+                            : const Color(
+                          0xFF1F2937,
+                        ),
+                        fontWeight:
+                        FontWeight.w600,
+                      ),
+                    ),
+                  );
+                },
+              ).toList(),
+              onChanged: isCompleted
+                  ? null
+                  : (value) async {
+                if (value == null ||
+                    value == status) {
+                  return;
+                }
+
+                DateTime? estimatedTime;
+
+                if (value ==
+                    'In Progress') {
+                  estimatedTime =
+                  await showEstimatedCompletionDialog(
+                    service,
+                  );
+
+                  if (estimatedTime ==
+                      null) {
+                    return;
+                  }
+                }
+
+                final confirmed =
+                await showStatusChangeConfirmation(
+                  service: service,
+                  newStatus: value,
+                  estimatedCompletionAt:
+                  estimatedTime,
+                );
+
+                if (!confirmed) {
+                  return;
+                }
+
+                await updatePendingStatus(
+                  service,
+                  value,
+                  estimatedCompletionAt:
+                  estimatedTime,
+                );
+              },
+            ),
+
+            if (estimatedCompletionText !=
+                'Not Set') ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding:
+                const EdgeInsets.all(13),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius:
+                  BorderRadius.circular(15),
+                  border: Border.all(
+                    color: Colors.blue
+                        .withOpacity(0.22),
+                  ),
+                ),
+                child:
+                buildServiceInformationRow(
+                  icon: Icons.schedule,
+                  title:
+                  'Estimated Completion',
+                  value:
+                  estimatedCompletionText,
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 16),
+
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style:
+                    OutlinedButton.styleFrom(
+                      foregroundColor:
+                      const Color(
+                        0xFF339BFF,
+                      ),
+                      side: const BorderSide(
+                        color:
+                        Color(0xFF339BFF),
+                      ),
+                      shape:
+                      RoundedRectangleBorder(
+                        borderRadius:
+                        BorderRadius.circular(
+                          14,
+                        ),
+                      ),
+                    ),
+                    onPressed: () {
+                      showPendingServiceDetailDialog(
+                        service,
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.visibility_outlined,
+                      size: 18,
+                    ),
+                    label:
+                    const Text('View Details'),
+                  ),
+                ),
+                if (!hasQuotation &&
+                    !isCompleted) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style:
+                      ElevatedButton.styleFrom(
+                        backgroundColor:
+                        const Color(
+                          0xFF339BFF,
+                        ),
+                        foregroundColor:
+                        Colors.white,
+                        shape:
+                        RoundedRectangleBorder(
+                          borderRadius:
+                          BorderRadius.circular(
+                            14,
+                          ),
+                        ),
+                      ),
                       onPressed: () {
-                        openCreateQuotation(service);
+                        openCreateQuotation(
+                          service,
+                        );
                       },
                       icon: const Icon(
                         Icons.receipt_long,
-                        size: 17,
+                        size: 18,
                       ),
-                      label: const Text('Create Quotation'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                        const Color(0xFF339BFF),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    )
-                  else if (hasQuotation)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.purple.shade50,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.receipt_long,
-                            color: Colors.purple,
-                            size: 17,
-                          ),
-                          SizedBox(width: 6),
-                          Text(
-                            'Quotation Linked',
-                            style: TextStyle(
-                              color: Colors.purple,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
+                      label: const Text(
+                        'Quotation',
                       ),
                     ),
+                  ),
                 ],
-              ),
-            ],
-          ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip:
+                  'Delete Pending Service',
+                  style: IconButton.styleFrom(
+                    backgroundColor:
+                    Colors.red.shade50,
+                    foregroundColor:
+                    Colors.red,
+                  ),
+                  onPressed: () {
+                    handleDeletePendingService(
+                      service,
+                    );
+                  },
+                  icon: const Icon(
+                    Icons.delete_outline,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -1922,7 +2750,7 @@ class _PendingServicePageState extends State<PendingServicePage> {
                       children: [
                         buildSummaryCard(
                           icon: Icons.car_repair,
-                          title: 'In Progress',
+                          title: 'Active Queue',
                           value: '${getInProgressCount()}',
                         ),
                         const SizedBox(width: 12),
@@ -1959,13 +2787,91 @@ class _PendingServicePageState extends State<PendingServicePage> {
                 ),
               ),
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 16),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+                child: Row(
+                  children: [
+                    buildStatusColumnButton(
+                      'Waiting Fix',
+                    ),
+                    const SizedBox(width: 8),
+                    buildStatusColumnButton(
+                      'In Progress',
+                    ),
+                    const SizedBox(width: 8),
+                    buildStatusColumnButton(
+                      'Completed',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 16),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  12,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '$selectedStatusColumn Services',
+                        style: const TextStyle(
+                          color: Color(0xFF1F2937),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${displayCars.length} vehicle(s)',
+                        style: const TextStyle(
+                          color: Color(0xFF339BFF),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             if (displayCars.isEmpty)
-              const SliverFillRemaining(
+              SliverFillRemaining(
+                hasScrollBody: false,
                 child: Center(
-                  child: Text(
-                    'No pending service found.',
-                    style: TextStyle(fontSize: 16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No $selectedStatusColumn service found.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
               )

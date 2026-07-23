@@ -38,7 +38,10 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> registerCustomer() async {
-    final name = fullNameController.text.trim();
+    final name = fullNameController.text
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .toUpperCase();
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
     final confirmPassword = confirmPasswordController.text.trim();
@@ -184,6 +187,7 @@ class _RegisterPageState extends State<RegisterPage> {
     bool obscureText = false,
     VoidCallback? onTogglePassword,
     TextInputType keyboardType = TextInputType.text,
+    TextCapitalization textCapitalization = TextCapitalization.none,
     List<TextInputFormatter>? inputFormatters,
   }) {
     return Column(
@@ -193,6 +197,7 @@ class _RegisterPageState extends State<RegisterPage> {
           controller: controller,
           obscureText: obscureText,
           keyboardType: keyboardType,
+          textCapitalization: textCapitalization,
           inputFormatters: inputFormatters,
           decoration: InputDecoration(
             hintText: hintText,
@@ -289,6 +294,18 @@ class _RegisterPageState extends State<RegisterPage> {
                   hintText: 'Full name',
                   icon: Icons.person,
                   errorText: nameError,
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [
+                    TextInputFormatter.withFunction(
+                          (oldValue, newValue) {
+                        return newValue.copyWith(
+                          text: newValue.text.toUpperCase(),
+                          selection: newValue.selection,
+                          composing: TextRange.empty,
+                        );
+                      },
+                    ),
+                  ],
                 ),
 
                 const SizedBox(height: 18),
