@@ -28,10 +28,17 @@ class _PendingServicePageState extends State<PendingServicePage> {
   Timer? realtimeRefreshTimer;
   bool isRealtimeRefreshing = false;
   final List<String> statusList = [
+    'Waiting Arrived',
     'Waiting Fix',
     'In Progress',
     'Completed',
   ];
+
+  final Set<String> allowedStatusUpdates = {
+    'Waiting Fix',
+    'In Progress',
+    'Completed',
+  };
 
   @override
   void initState() {
@@ -270,6 +277,7 @@ class _PendingServicePageState extends State<PendingServicePage> {
     if (status == 'Completed') return Colors.green;
     if (status == 'In Progress') return Colors.blue;
     if (status == 'Waiting Fix') return Colors.orange;
+    if (status == 'Waiting Arrived') return Colors.grey;
     return Colors.grey;
   }
 
@@ -277,15 +285,63 @@ class _PendingServicePageState extends State<PendingServicePage> {
     if (status == 'Completed') return Colors.green.shade50;
     if (status == 'In Progress') return Colors.blue.shade50;
     if (status == 'Waiting Fix') return Colors.orange.shade50;
+    if (status == 'Waiting Arrived') return Colors.grey.shade100;
     return Colors.grey.shade100;
   }
 
-  String getNotificationMessage(String status, String plate) {
+  DateTime? parseDatabaseDateTime(dynamic value) {
+    final rawValue = value?.toString().trim();
+
+    if (rawValue == null || rawValue.isEmpty) {
+      return null;
+    }
+
+    return DateTime.tryParse(rawValue)?.toLocal();
+  }
+
+  String formatDateTime(DateTime dateTime) {
+    final localDateTime = dateTime.toLocal();
+
+    final day = localDateTime.day.toString().padLeft(2, '0');
+    final month = localDateTime.month.toString().padLeft(2, '0');
+    final year = localDateTime.year.toString();
+
+    final hourValue = localDateTime.hour % 12 == 0
+        ? 12
+        : localDateTime.hour % 12;
+
+    final hour = hourValue.toString().padLeft(2, '0');
+    final minute = localDateTime.minute.toString().padLeft(2, '0');
+    final period = localDateTime.hour >= 12 ? 'PM' : 'AM';
+
+    return '$day/$month/$year $hour:$minute $period';
+  }
+
+  String formatStoredDateTime(dynamic value) {
+    final parsedDateTime = parseDatabaseDateTime(value);
+
+    if (parsedDateTime == null) {
+      return 'Not Set';
+    }
+
+    return formatDateTime(parsedDateTime);
+  }
+
+  String getNotificationMessage(
+      String status,
+      String plate, {
+        DateTime? estimatedCompletionAt,
+      }) {
     if (status == 'Waiting Fix') {
       return 'Your vehicle $plate is waiting for inspection and repair.';
     }
 
     if (status == 'In Progress') {
+      if (estimatedCompletionAt != null) {
+        return 'Your vehicle $plate is currently being serviced. '
+            'Estimated completion: ${formatDateTime(estimatedCompletionAt)}.';
+      }
+
       return 'Your vehicle $plate is currently being serviced.';
     }
 
@@ -294,6 +350,367 @@ class _PendingServicePageState extends State<PendingServicePage> {
     }
 
     return 'Your vehicle $plate service status has been updated.';
+  }
+
+  Future<DateTime?> showEstimatedCompletionDialog(
+      Map<String, dynamic> service,
+      ) async {
+    final vehicle = service['vehicles'] ?? {};
+    final plate = vehicle['plate_number']?.toString() ?? 'Vehicle';
+
+    final existingEstimate = parseDatabaseDateTime(
+      service['estimated_completion_at'],
+    );
+
+    DateTime? selectedDate;
+
+    if (existingEstimate != null) {
+      selectedDate = DateTime(
+        existingEstimate.year,
+        existingEstimate.month,
+        existingEstimate.day,
+      );
+    }
+
+    TimeOfDay? selectedTime;
+
+    if (existingEstimate != null) {
+      selectedTime = TimeOfDay.fromDateTime(
+        existingEstimate,
+      );
+    }
+
+    String? validationMessage;
+
+    return showDialog<DateTime>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (
+              dialogContext,
+              setDialogState,
+              ) {
+            Future<void> chooseDate() async {
+              final now = DateTime.now();
+              final today = DateTime(
+                now.year,
+                now.month,
+                now.day,
+              );
+
+              final lastDate = DateTime(
+                now.year + 1,
+                now.month,
+                now.day,
+              );
+
+              DateTime initialDate = selectedDate ?? today;
+
+              if (initialDate.isBefore(today)) {
+                initialDate = today;
+              }
+
+              if (initialDate.isAfter(lastDate)) {
+                initialDate = lastDate;
+              }
+
+              final pickedDate = await showDatePicker(
+                context: dialogContext,
+                initialDate: initialDate,
+                firstDate: today,
+                lastDate: lastDate,
+              );
+
+              if (pickedDate == null) {
+                return;
+              }
+
+              setDialogState(() {
+                selectedDate = pickedDate;
+                validationMessage = null;
+              });
+            }
+
+            Future<void> chooseTime() async {
+              final initialTime = selectedTime ??
+                  TimeOfDay.fromDateTime(
+                    DateTime.now().add(
+                      const Duration(hours: 2),
+                    ),
+                  );
+
+              final pickedTime = await showTimePicker(
+                context: dialogContext,
+                initialTime: initialTime,
+              );
+
+              if (pickedTime == null) {
+                return;
+              }
+
+              setDialogState(() {
+                selectedTime = pickedTime;
+                validationMessage = null;
+              });
+            }
+
+            final selectedDateText = selectedDate == null
+                ? 'Select completion date'
+                : '${selectedDate!.day.toString().padLeft(2, '0')}/'
+                '${selectedDate!.month.toString().padLeft(2, '0')}/'
+                '${selectedDate!.year}';
+
+            final selectedTimeText = selectedTime == null
+                ? 'Select completion time'
+                : selectedTime!.format(dialogContext);
+
+            return AlertDialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 30,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+              title: const Text(
+                'Start Service',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEAF4FF),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.directions_car,
+                              color: Color(0xFF339BFF),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                '$plate will be changed to In Progress.',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Estimated Completion Time',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Select the expected date and time that the vehicle service will be completed.',
+                        style: TextStyle(
+                          color: Colors.black54,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: chooseDate,
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 15,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF5F7FA),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: selectedDate == null
+                                  ? Colors.grey.shade300
+                                  : const Color(0xFF339BFF),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.calendar_month,
+                                color: Color(0xFF339BFF),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  selectedDateText,
+                                  style: TextStyle(
+                                    color: selectedDate == null
+                                        ? Colors.black54
+                                        : const Color(0xFF1F2937),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const Icon(
+                                Icons.arrow_forward_ios,
+                                size: 15,
+                                color: Colors.black38,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: chooseTime,
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 15,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF5F7FA),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: selectedTime == null
+                                  ? Colors.grey.shade300
+                                  : const Color(0xFF339BFF),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.schedule,
+                                color: Color(0xFF339BFF),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  selectedTimeText,
+                                  style: TextStyle(
+                                    color: selectedTime == null
+                                        ? Colors.black54
+                                        : const Color(0xFF1F2937),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const Icon(
+                                Icons.arrow_forward_ios,
+                                size: 15,
+                                color: Colors.black38,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (validationMessage != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.error_outline,
+                                color: Colors.red,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  validationMessage!,
+                                  style: const TextStyle(
+                                    color: Colors.red,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                  },
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF339BFF),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    if (selectedDate == null ||
+                        selectedTime == null) {
+                      setDialogState(() {
+                        validationMessage =
+                        'Please select both the estimated completion date and time.';
+                      });
+
+                      return;
+                    }
+
+                    final estimatedCompletionAt = DateTime(
+                      selectedDate!.year,
+                      selectedDate!.month,
+                      selectedDate!.day,
+                      selectedTime!.hour,
+                      selectedTime!.minute,
+                    );
+
+                    if (!estimatedCompletionAt.isAfter(
+                      DateTime.now(),
+                    )) {
+                      setDialogState(() {
+                        validationMessage =
+                        'Estimated completion time must be later than the current time.';
+                      });
+
+                      return;
+                    }
+
+                    Navigator.pop(
+                      dialogContext,
+                      estimatedCompletionAt,
+                    );
+                  },
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text(
+                    'Confirm Start Service',
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> sendFcmPushNotification({
@@ -323,8 +740,9 @@ class _PendingServicePageState extends State<PendingServicePage> {
   }
   Future<void> updatePendingStatus(
       Map<String, dynamic> service,
-      String newStatus,
-      ) async {
+      String newStatus, {
+        DateTime? estimatedCompletionAt,
+      }) async {
     final pendingId =
     service['pending_id']
         ?.toString()
@@ -338,9 +756,29 @@ class _PendingServicePageState extends State<PendingServicePage> {
       return;
     }
 
-    if (!statusList.contains(newStatus)) {
+    if (!allowedStatusUpdates.contains(
+      newStatus,
+    )) {
       showMessage(
         'The selected service status is invalid.',
+      );
+      return;
+    }
+
+    if (newStatus == 'In Progress' &&
+        estimatedCompletionAt == null) {
+      showMessage(
+        'Please select the estimated completion time before starting the service.',
+      );
+      return;
+    }
+
+    if (estimatedCompletionAt != null &&
+        !estimatedCompletionAt.isAfter(
+          DateTime.now(),
+        )) {
+      showMessage(
+        'Estimated completion time must be later than the current time.',
       );
       return;
     }
@@ -351,6 +789,10 @@ class _PendingServicePageState extends State<PendingServicePage> {
         params: {
           'p_pending_id': pendingId,
           'p_new_status': newStatus,
+          'p_estimated_completion_at':
+          estimatedCompletionAt
+              ?.toUtc()
+              .toIso8601String(),
         },
       );
 
@@ -404,11 +846,17 @@ class _PendingServicePageState extends State<PendingServicePage> {
           ? 'your vehicle'
           : plateValue;
 
+      final returnedEstimate =
+          parseDatabaseDateTime(
+            result['estimated_completion_at'],
+          ) ??
+              estimatedCompletionAt;
+
       /*
-     * Notification runs after the transaction.
-     * Notification failure will not undo the
-     * completed service operation.
-     */
+       * Notification runs after the transaction.
+       * Notification failure will not undo the
+       * completed service operation.
+       */
       if (customerId != null &&
           customerId.isNotEmpty) {
         try {
@@ -417,21 +865,28 @@ class _PendingServicePageState extends State<PendingServicePage> {
           final String targetPage;
 
           if (automaticRecordCreated) {
-            title = 'Service Record Available';
+            title =
+            'Service Record Available';
             message =
             'The service for vehicle $plate has been completed. Your service record is now available.';
             targetPage = 'service_records';
-          } else if (newStatus == 'Completed') {
-            title = 'Vehicle Service Completed';
+          } else if (newStatus ==
+              'Completed') {
+            title =
+            'Vehicle Service Completed';
             message =
             'Your vehicle $plate service has been completed.';
             targetPage = 'my_bookings';
           } else {
-            title = 'Vehicle Status Updated';
-            message = getNotificationMessage(
-              newStatus,
-              plate,
-            );
+            title =
+            'Vehicle Status Updated';
+            message =
+                getNotificationMessage(
+                  newStatus,
+                  plate,
+                  estimatedCompletionAt:
+                  returnedEstimate,
+                );
             targetPage = 'my_bookings';
           }
 
@@ -460,7 +915,8 @@ class _PendingServicePageState extends State<PendingServicePage> {
               'target_page': targetPage,
               if (recordId != null)
                 'record_id': recordId,
-              if (returnedPendingId != null)
+              if (returnedPendingId !=
+                  null)
                 'pending_id':
                 returnedPendingId,
               if (vehicleId != null)
@@ -470,6 +926,11 @@ class _PendingServicePageState extends State<PendingServicePage> {
               if (quotationId != null)
                 'quotation_id':
                 quotationId,
+              if (returnedEstimate != null)
+                'estimated_completion_at':
+                returnedEstimate
+                    .toUtc()
+                    .toIso8601String(),
             },
           );
         } catch (
@@ -493,9 +954,17 @@ class _PendingServicePageState extends State<PendingServicePage> {
         showMessage(
           'Service completed and service record created automatically.',
         );
-      } else if (newStatus == 'Completed') {
+      } else if (newStatus ==
+          'Completed') {
         showMessage(
           'Walk-in service completed. Create the service record manually from Service Records.',
+        );
+      } else if (newStatus ==
+          'In Progress' &&
+          returnedEstimate != null) {
+        showMessage(
+          'Service started. Estimated completion: '
+              '${formatDateTime(returnedEstimate)}.',
         );
       } else {
         showMessage(
@@ -508,7 +977,16 @@ class _PendingServicePageState extends State<PendingServicePage> {
       );
 
       await fetchPendingServices();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Pending service status update failed: '
+            '$error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
       showMessage(
         'Failed to update status: $error',
       );
@@ -738,6 +1216,13 @@ class _PendingServicePageState extends State<PendingServicePage> {
                     service['status']?.toString() ??
                         'Waiting Fix',
                   ),
+                  if (service['estimated_completion_at'] != null)
+                    buildPendingDetailRow(
+                      'Estimated Completion',
+                      formatStoredDateTime(
+                        service['estimated_completion_at'],
+                      ),
+                    ),
                   buildPendingDetailRow(
                     'Problem',
                     quotation?['problem_description']
@@ -861,7 +1346,14 @@ class _PendingServicePageState extends State<PendingServicePage> {
     final customer = service['customers'] ?? {};
     final quotation = service['quotations'];
 
-    final status = service['status'] ?? 'Waiting Fix';
+    final status =
+        service['status']?.toString() ??
+            'Waiting Fix';
+
+    final estimatedCompletionText =
+    formatStoredDateTime(
+      service['estimated_completion_at'],
+    );
 
     final plate = vehicle['plate_number'] ?? '';
     final model = vehicle['car_model'] ?? '';
@@ -993,31 +1485,75 @@ class _PendingServicePageState extends State<PendingServicePage> {
               const SizedBox(height: 14),
 
               DropdownButtonFormField<String>(
-                value: status,
+                value: statusList.contains(status)
+                    ? status
+                    : null,
                 isExpanded: true,
                 decoration: InputDecoration(
                   labelText: 'Service Status',
                   floatingLabelBehavior:
                   FloatingLabelBehavior.always,
-                  prefixIcon: const Icon(Icons.update),
+                  prefixIcon:
+                  const Icon(Icons.update),
                   filled: true,
-                  fillColor: Colors.grey.shade100,
+                  fillColor:
+                  Colors.grey.shade100,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide.none,
+                    borderRadius:
+                    BorderRadius.circular(16),
+                    borderSide:
+                    BorderSide.none,
                   ),
                 ),
-                items: statusList.map((itemStatus) {
-                  return DropdownMenuItem(
-                    value: itemStatus,
-                    child: Text(itemStatus),
-                  );
-                }).toList(),
+                items: statusList.map(
+                      (itemStatus) {
+                    final isWaitingArrival =
+                        itemStatus ==
+                            'Waiting Arrived';
+
+                    return DropdownMenuItem<
+                        String>(
+                      value: itemStatus,
+                      enabled:
+                      !isWaitingArrival,
+                      child: Text(
+                        itemStatus,
+                        style: TextStyle(
+                          color: isWaitingArrival
+                              ? Colors.black38
+                              : null,
+                        ),
+                      ),
+                    );
+                  },
+                ).toList(),
                 onChanged: isCompleted
                     ? null
                     : (value) async {
                   if (value == null ||
                       value == status) {
+                    return;
+                  }
+
+                  if (value ==
+                      'In Progress') {
+                    final estimatedTime =
+                    await showEstimatedCompletionDialog(
+                      service,
+                    );
+
+                    if (estimatedTime ==
+                        null) {
+                      return;
+                    }
+
+                    await updatePendingStatus(
+                      service,
+                      value,
+                      estimatedCompletionAt:
+                      estimatedTime,
+                    );
+
                     return;
                   }
 
@@ -1027,6 +1563,61 @@ class _PendingServicePageState extends State<PendingServicePage> {
                   );
                 },
               ),
+
+              if (estimatedCompletionText !=
+                  'Not Set') ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding:
+                  const EdgeInsets.all(13),
+                  decoration: BoxDecoration(
+                    color:
+                    Colors.blue.shade50,
+                    borderRadius:
+                    BorderRadius.circular(15),
+                    border: Border.all(
+                      color: Colors.blue
+                          .withOpacity(0.25),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.schedule,
+                        color: Colors.blue,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Estimated Completion',
+                          style: TextStyle(
+                            color: Colors.black54,
+                            fontWeight:
+                            FontWeight.w600,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          estimatedCompletionText,
+                          textAlign:
+                          TextAlign.right,
+                          style: const TextStyle(
+                            color: Colors.blue,
+                            fontWeight:
+                            FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 12),
 

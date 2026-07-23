@@ -15,12 +15,15 @@ class AppResultMessage {
   static OverlayEntry? _currentEntry;
 
   static void show(
-    BuildContext context, {
-    required String message,
-    AppResultType? type,
-    Duration duration = const Duration(seconds: 3),
-  }) {
-    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+      BuildContext context, {
+        required String message,
+        AppResultType? type,
+        Duration duration = const Duration(seconds: 3),
+      }) {
+    final overlay = Overlay.maybeOf(
+      context,
+      rootOverlay: true,
+    );
 
     if (overlay == null) {
       debugPrint('Result message: $message');
@@ -36,34 +39,44 @@ class AppResultMessage {
   }
 
   static void showOnOverlay(
-    OverlayState overlay, {
-    required String message,
-    AppResultType? type,
-    Duration duration = const Duration(seconds: 3),
-  }) {
+      OverlayState overlay, {
+        required String message,
+        AppResultType? type,
+        Duration duration = const Duration(seconds: 3),
+      }) {
     final cleanMessage = message.trim();
-    if (cleanMessage.isEmpty) return;
+
+    if (cleanMessage.isEmpty) {
+      return;
+    }
 
     _removeCurrentEntry();
 
-    final resolvedType = type ?? inferType(cleanMessage);
+    final resolvedType =
+        type ?? inferType(cleanMessage);
+
     late final OverlayEntry entry;
 
     entry = OverlayEntry(
-      builder: (context) => _AppResultOverlay(
-        message: cleanMessage,
-        type: resolvedType,
-        duration: duration,
-        onDismiss: () {
-          if (entry.mounted) {
-            entry.remove();
-          }
+      builder: (context) {
+        return _AppResultOverlay(
+          message: cleanMessage,
+          type: resolvedType,
+          duration: duration,
+          onDismiss: () {
+            if (entry.mounted) {
+              entry.remove();
+            }
 
-          if (identical(_currentEntry, entry)) {
-            _currentEntry = null;
-          }
-        },
-      ),
+            if (identical(
+              _currentEntry,
+              entry,
+            )) {
+              _currentEntry = null;
+            }
+          },
+        );
+      },
     );
 
     _currentEntry = entry;
@@ -71,10 +84,11 @@ class AppResultMessage {
   }
 
   static void success(
-    BuildContext context, {
-    required String message,
-    Duration duration = const Duration(seconds: 3),
-  }) {
+      BuildContext context, {
+        required String message,
+        Duration duration =
+        const Duration(seconds: 3),
+      }) {
     show(
       context,
       message: message,
@@ -84,10 +98,11 @@ class AppResultMessage {
   }
 
   static void error(
-    BuildContext context, {
-    required String message,
-    Duration duration = const Duration(seconds: 4),
-  }) {
+      BuildContext context, {
+        required String message,
+        Duration duration =
+        const Duration(seconds: 4),
+      }) {
     show(
       context,
       message: message,
@@ -97,10 +112,11 @@ class AppResultMessage {
   }
 
   static void warning(
-    BuildContext context, {
-    required String message,
-    Duration duration = const Duration(seconds: 3),
-  }) {
+      BuildContext context, {
+        required String message,
+        Duration duration =
+        const Duration(seconds: 3),
+      }) {
     show(
       context,
       message: message,
@@ -110,10 +126,11 @@ class AppResultMessage {
   }
 
   static void info(
-    BuildContext context, {
-    required String message,
-    Duration duration = const Duration(seconds: 3),
-  }) {
+      BuildContext context, {
+        required String message,
+        Duration duration =
+        const Duration(seconds: 3),
+      }) {
     show(
       context,
       message: message,
@@ -122,8 +139,63 @@ class AppResultMessage {
     );
   }
 
-  static AppResultType inferType(String message) {
-    final value = message.toLowerCase();
+  static AppResultType inferType(
+      String message,
+      ) {
+    final value = message
+        .toLowerCase()
+        .replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    )
+        .trim();
+
+    /*
+     * Check complete negative phrases before
+     * individual success words.
+     *
+     * Example:
+     * "The linked booking can no longer be
+     * processed."
+     *
+     * The old logic detected "linked" and showed
+     * a green Successful popup. This negative
+     * phrase check prevents that.
+     */
+    const negativePhrases = <String>[
+      'can no longer',
+      'could no longer',
+      'cannot be',
+      "can't be",
+      'could not be',
+      'was not',
+      'were not',
+      'is not allowed',
+      'are not allowed',
+      'not permitted',
+      'not processed',
+      'not be processed',
+      'not completed correctly',
+      'not updated correctly',
+      'not created correctly',
+      'not deleted correctly',
+      'not saved correctly',
+      'not returned',
+      'cannot continue',
+      'cannot proceed',
+      'unable to',
+      'failed to',
+      'operation failed',
+      'transaction failed',
+      'permission denied',
+      'access denied',
+    ];
+
+    if (negativePhrases.any(
+      value.contains,
+    )) {
+      return AppResultType.error;
+    }
 
     const errorWords = <String>[
       'failed',
@@ -135,6 +207,8 @@ class AppResultMessage {
       'invalid',
       'incorrect',
       'denied',
+      'blocked',
+      'refused',
       'not logged in',
       'not authorised',
       'not authorized',
@@ -148,6 +222,12 @@ class AppResultMessage {
       'policy',
       'missing from-clause',
     ];
+
+    if (errorWords.any(
+      value.contains,
+    )) {
+      return AppResultType.error;
+    }
 
     const warningWords = <String>[
       'please',
@@ -173,7 +253,14 @@ class AppResultMessage {
       'no quotation',
       'no record',
       'wait',
+      'refresh and try again',
     ];
+
+    if (warningWords.any(
+      value.contains,
+    )) {
+      return AppResultType.warning;
+    }
 
     const successWords = <String>[
       'success',
@@ -194,27 +281,20 @@ class AppResultMessage {
       'removed',
       'submitted',
       'uploaded',
-      'selected',
       'verified',
       'sent',
       'marked as read',
+      'marked as arrived',
       'turned on',
       'turned off',
       'enabled',
       'disabled',
-      'changed',
-      'linked',
+      'linked successfully',
     ];
 
-    if (errorWords.any(value.contains)) {
-      return AppResultType.error;
-    }
-
-    if (warningWords.any(value.contains)) {
-      return AppResultType.warning;
-    }
-
-    if (successWords.any(value.contains)) {
+    if (successWords.any(
+      value.contains,
+    )) {
       return AppResultType.success;
     }
 
@@ -225,13 +305,15 @@ class AppResultMessage {
     final entry = _currentEntry;
     _currentEntry = null;
 
-    if (entry != null && entry.mounted) {
+    if (entry != null &&
+        entry.mounted) {
       entry.remove();
     }
   }
 }
 
-class _AppResultOverlay extends StatefulWidget {
+class _AppResultOverlay
+    extends StatefulWidget {
   final String message;
   final AppResultType type;
   final Duration duration;
@@ -245,14 +327,22 @@ class _AppResultOverlay extends StatefulWidget {
   });
 
   @override
-  State<_AppResultOverlay> createState() => _AppResultOverlayState();
+  State<_AppResultOverlay> createState() =>
+      _AppResultOverlayState();
 }
 
-class _AppResultOverlayState extends State<_AppResultOverlay>
+class _AppResultOverlayState
+    extends State<_AppResultOverlay>
     with SingleTickerProviderStateMixin {
-  late final AnimationController animationController;
-  late final Animation<double> fadeAnimation;
-  late final Animation<Offset> slideAnimation;
+  late final AnimationController
+  animationController;
+
+  late final Animation<double>
+  fadeAnimation;
+
+  late final Animation<Offset>
+  slideAnimation;
+
   Timer? dismissTimer;
   bool isDismissing = false;
 
@@ -260,11 +350,14 @@ class _AppResultOverlayState extends State<_AppResultOverlay>
   void initState() {
     super.initState();
 
-    animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 260),
-      reverseDuration: const Duration(milliseconds: 190),
-    );
+    animationController =
+        AnimationController(
+          vsync: this,
+          duration:
+          const Duration(milliseconds: 260),
+          reverseDuration:
+          const Duration(milliseconds: 190),
+        );
 
     fadeAnimation = CurvedAnimation(
       parent: animationController,
@@ -284,11 +377,18 @@ class _AppResultOverlayState extends State<_AppResultOverlay>
     );
 
     animationController.forward();
-    dismissTimer = Timer(widget.duration, dismiss);
+
+    dismissTimer = Timer(
+      widget.duration,
+      dismiss,
+    );
   }
 
   Future<void> dismiss() async {
-    if (isDismissing) return;
+    if (isDismissing) {
+      return;
+    }
+
     isDismissing = true;
     dismissTimer?.cancel();
 
@@ -307,15 +407,24 @@ class _AppResultOverlayState extends State<_AppResultOverlay>
   }
 
   @override
-  Widget build(BuildContext context) {
-    final style = _ResultStyle.fromType(widget.type);
+  Widget build(
+      BuildContext context,
+      ) {
+    final style =
+    _ResultStyle.fromType(widget.type);
 
     return Positioned(
       top: 0,
       left: 0,
       right: 0,
       child: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+        minimum:
+        const EdgeInsets.fromLTRB(
+          14,
+          12,
+          14,
+          0,
+        ),
         child: SlideTransition(
           position: slideAnimation,
           child: FadeTransition(
@@ -324,79 +433,117 @@ class _AppResultOverlayState extends State<_AppResultOverlay>
               color: Colors.transparent,
               child: Semantics(
                 liveRegion: true,
-                label: '${style.title}: ${widget.message}',
-                child: Container(
-                  constraints: const BoxConstraints(maxWidth: 560),
-                  padding: const EdgeInsets.fromLTRB(14, 13, 8, 13),
-                  decoration: BoxDecoration(
-                    color: style.backgroundColor,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: style.color.withOpacity(0.28),
+                label:
+                '${style.title}: ${widget.message}',
+                child: Center(
+                  child: Container(
+                    width: double.infinity,
+                    constraints:
+                    const BoxConstraints(
+                      maxWidth: 560,
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.14),
-                        blurRadius: 18,
-                        offset: const Offset(0, 7),
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      14,
+                      13,
+                      8,
+                      13,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                      style.backgroundColor,
+                      borderRadius:
+                      BorderRadius.circular(
+                        18,
                       ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: style.color,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          style.icon,
-                          color: Colors.white,
-                          size: 27,
-                        ),
+                      border: Border.all(
+                        color: style.color
+                            .withOpacity(0.28),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              style.title,
-                              style: TextStyle(
-                                color: style.textColor,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black
+                              .withOpacity(0.14),
+                          blurRadius: 18,
+                          offset:
+                          const Offset(0, 7),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration:
+                          BoxDecoration(
+                            color: style.color,
+                            shape:
+                            BoxShape.circle,
+                          ),
+                          child: Icon(
+                            style.icon,
+                            color: Colors.white,
+                            size: 27,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize:
+                            MainAxisSize.min,
+                            crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+                            children: [
+                              Text(
+                                style.title,
+                                style: TextStyle(
+                                  color:
+                                  style.textColor,
+                                  fontSize: 15,
+                                  fontWeight:
+                                  FontWeight.w800,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              widget.message,
-                              maxLines: 4,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: style.textColor.withOpacity(0.82),
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w500,
-                                height: 1.3,
+                              const SizedBox(
+                                height: 3,
                               ),
-                            ),
-                          ],
+                              Text(
+                                widget.message,
+                                maxLines: 4,
+                                overflow:
+                                TextOverflow
+                                    .ellipsis,
+                                style: TextStyle(
+                                  color: style
+                                      .textColor
+                                      .withOpacity(
+                                    0.82,
+                                  ),
+                                  fontSize: 13.5,
+                                  fontWeight:
+                                  FontWeight.w500,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: dismiss,
-                        icon: Icon(
-                          Icons.close_rounded,
-                          color: style.textColor.withOpacity(0.62),
-                          size: 21,
+                        IconButton(
+                          tooltip: 'Close',
+                          visualDensity:
+                          VisualDensity.compact,
+                          onPressed: dismiss,
+                          icon: Icon(
+                            Icons.close_rounded,
+                            color: style.textColor
+                                .withOpacity(0.62),
+                            size: 21,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -423,39 +570,54 @@ class _ResultStyle {
     required this.textColor,
   });
 
-  factory _ResultStyle.fromType(AppResultType type) {
+  factory _ResultStyle.fromType(
+      AppResultType type,
+      ) {
     switch (type) {
       case AppResultType.success:
         return const _ResultStyle(
           title: 'Successful',
           icon: Icons.check_rounded,
           color: Color(0xFF16A34A),
-          backgroundColor: Color(0xFFF0FDF4),
-          textColor: Color(0xFF14532D),
+          backgroundColor:
+          Color(0xFFF0FDF4),
+          textColor:
+          Color(0xFF14532D),
         );
+
       case AppResultType.error:
         return const _ResultStyle(
           title: 'Unsuccessful',
           icon: Icons.close_rounded,
           color: Color(0xFFDC2626),
-          backgroundColor: Color(0xFFFEF2F2),
-          textColor: Color(0xFF7F1D1D),
+          backgroundColor:
+          Color(0xFFFEF2F2),
+          textColor:
+          Color(0xFF7F1D1D),
         );
+
       case AppResultType.warning:
         return const _ResultStyle(
           title: 'Attention',
-          icon: Icons.warning_amber_rounded,
+          icon:
+          Icons.warning_amber_rounded,
           color: Color(0xFFF59E0B),
-          backgroundColor: Color(0xFFFFFBEB),
-          textColor: Color(0xFF78350F),
+          backgroundColor:
+          Color(0xFFFFFBEB),
+          textColor:
+          Color(0xFF78350F),
         );
+
       case AppResultType.info:
         return const _ResultStyle(
           title: 'Information',
-          icon: Icons.info_outline_rounded,
+          icon:
+          Icons.info_outline_rounded,
           color: Color(0xFF339BFF),
-          backgroundColor: Color(0xFFEFF6FF),
-          textColor: Color(0xFF1E3A8A),
+          backgroundColor:
+          Color(0xFFEFF6FF),
+          textColor:
+          Color(0xFF1E3A8A),
         );
     }
   }

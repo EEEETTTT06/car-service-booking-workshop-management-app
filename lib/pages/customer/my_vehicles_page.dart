@@ -1001,29 +1001,24 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
     required String model,
     required List<XFile> vocPhotos,
     required List<XFile> vehiclePhotos,
-    required List<Map<String, dynamic>>
-    removedExistingPhotos,
+    required List<Map<String, dynamic>> removedExistingPhotos,
   }) async {
-    final normalizedVehicleId =
-    vehicleId.trim();
-
-    final upperPlate =
-    plate.trim().toUpperCase();
-
-    final upperModel =
-    model.trim().toUpperCase();
+    final normalizedVehicleId = vehicleId.trim();
+    final upperPlate = plate.trim().toUpperCase();
+    final upperModel = model.trim().toUpperCase();
 
     if (normalizedVehicleId.isEmpty) {
-      showMessage(
-        'Vehicle information is missing.',
+      AppResultMessage.warning(
+        context,
+        message: 'Vehicle information is missing.',
       );
       return;
     }
 
-    if (upperPlate.isEmpty ||
-        upperModel.isEmpty) {
-      showMessage(
-        'Please complete vehicle information.',
+    if (upperPlate.isEmpty || upperModel.isEmpty) {
+      AppResultMessage.warning(
+        context,
+        message: 'Please complete vehicle information.',
       );
       return;
     }
@@ -1032,12 +1027,9 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
       final rpcResult = await supabase.rpc(
         'customer_update_vehicle',
         params: {
-          'p_vehicle_id':
-          normalizedVehicleId,
-          'p_plate_number':
-          upperPlate,
-          'p_car_model':
-          upperModel,
+          'p_vehicle_id': normalizedVehicleId,
+          'p_plate_number': upperPlate,
+          'p_car_model': upperModel,
         },
       );
 
@@ -1047,29 +1039,24 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
         );
       }
 
-      final result =
-      Map<String, dynamic>.from(
+      final result = Map<String, dynamic>.from(
         rpcResult,
       );
 
       final returnedVehicleId =
-      result['vehicle_id']
-          ?.toString()
-          .trim();
+      result['vehicle_id']?.toString().trim();
 
       final returnedPlate =
-      result['plate_number']
-          ?.toString()
-          .trim();
+      result['plate_number']?.toString().trim();
 
       final returnedModel =
-      result['car_model']
-          ?.toString()
-          .trim();
+      result['car_model']?.toString().trim();
 
       final verificationStatus =
-      result['verification_status']
-          ?.toString();
+      result['verification_status']?.toString().trim();
+
+      final detailsChanged =
+          result['details_changed'] == true;
 
       if (returnedVehicleId == null ||
           returnedVehicleId.isEmpty) {
@@ -1078,47 +1065,50 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
         );
       }
 
-      if (verificationStatus !=
-          'Pending Claim') {
+      if (verificationStatus == null ||
+          verificationStatus.isEmpty) {
         throw Exception(
-          'The vehicle was not returned to '
-              'Pending Claim status.',
+          'Vehicle verification status was not returned.',
         );
       }
 
-      final uploadResult =
-      await uploadVehiclePhotos(
+      final uploadResult = await uploadVehiclePhotos(
         vehicleId: returnedVehicleId,
         vocPhotos: vocPhotos,
         vehiclePhotos: vehiclePhotos,
       );
 
-      final deleteResult =
-      await deleteVehicleImages(
+      final deleteResult = await deleteVehicleImages(
         removedExistingPhotos,
       );
 
-      try {
-        await notifyAdminsVehicleClaim(
-          plate:
-          returnedPlate == null ||
-              returnedPlate.isEmpty
-              ? upperPlate
-              : returnedPlate,
-          model:
-          returnedModel == null ||
-              returnedModel.isEmpty
-              ? upperModel
-              : returnedModel,
-        );
-      } catch (notificationError) {
-        debugPrint(
-          'Vehicle update notification failed: '
-              '$notificationError',
-        );
+      if (verificationStatus == 'Pending Claim') {
+        try {
+          await notifyAdminsVehicleClaim(
+            plate: returnedPlate == null ||
+                returnedPlate.isEmpty
+                ? upperPlate
+                : returnedPlate,
+            model: returnedModel == null ||
+                returnedModel.isEmpty
+                ? upperModel
+                : returnedModel,
+          );
+        } catch (notificationError, stackTrace) {
+          debugPrint(
+            'Vehicle update notification failed: '
+                '$notificationError',
+          );
+
+          debugPrint(
+            stackTrace.toString(),
+          );
+        }
       }
 
       await loadData();
+
+      if (!mounted) return;
 
       final uploadedCount =
           uploadResult['uploaded'] ?? 0;
@@ -1132,36 +1122,158 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
       final deleteFailed =
           deleteResult['failed'] ?? 0;
 
-      if (uploadFailed == 0 &&
-          deleteFailed == 0) {
-        showMessage(
-          'Vehicle updated successfully. '
-              '$uploadedCount new photo(s) uploaded and '
-              '$deletedCount photo(s) removed.',
-        );
-      } else {
-        showMessage(
+      final photoChangesMade =
+          uploadedCount > 0 || deletedCount > 0;
+
+      final totalFailed =
+          uploadFailed + deleteFailed;
+
+      if (totalFailed > 0) {
+        AppResultMessage.warning(
+          context,
+          message:
           'Vehicle information was updated, but '
               'some photo changes failed. '
               '$uploadedCount uploaded, '
               '$deletedCount removed, '
-              '${uploadFailed + deleteFailed} failed.',
+              '$totalFailed failed.',
+          duration: const Duration(seconds: 5),
+        );
+        return;
+      }
+
+      if (detailsChanged &&
+          verificationStatus == 'Pending Claim') {
+        AppResultMessage.success(
+          context,
+          message:
+          'Vehicle details updated successfully. '
+              'The vehicle is now pending admin verification. '
+              '$uploadedCount photo(s) uploaded and '
+              '$deletedCount photo(s) removed.',
+          duration: const Duration(seconds: 4),
+        );
+        return;
+      }
+
+      if (photoChangesMade) {
+        AppResultMessage.success(
+          context,
+          message:
+          'Vehicle photos updated successfully. '
+              '$uploadedCount photo(s) uploaded and '
+              '$deletedCount photo(s) removed.',
+        );
+        return;
+      }
+
+      AppResultMessage.info(
+        context,
+        message:
+        'No vehicle or photo changes were made.',
+      );
+    } on PostgrestException catch (error) {
+      if (mounted) {
+        AppResultMessage.error(
+          context,
+          message: error.message,
         );
       }
-    } on PostgrestException catch (error) {
-      showMessage(error.message);
+
       await loadData();
     } catch (error, stackTrace) {
       debugPrint(
         'Update customer vehicle failed: $error',
       );
 
-      debugPrint(stackTrace.toString());
+      debugPrint(
+        stackTrace.toString(),
+      );
 
-      showMessage(
+      if (!mounted) return;
+
+      AppResultMessage.error(
+        context,
+        message:
         'Failed to update vehicle: $error',
       );
     }
+  }
+
+
+  List<String> getStoragePathsFromDeletionResult(
+      Map<String, dynamic> result,
+      ) {
+    final rawPaths = result['storage_paths'];
+
+    if (rawPaths is! List) {
+      return <String>[];
+    }
+
+    final uniquePaths = <String>{};
+
+    for (final rawPath in rawPaths) {
+      final path = rawPath?.toString().trim() ?? '';
+
+      if (path.isNotEmpty) {
+        uniquePaths.add(path);
+      }
+    }
+
+    return uniquePaths.toList();
+  }
+
+  Future<Map<String, int>> removeVehicleStorageFiles(
+      List<String> storagePaths,
+      ) async {
+    if (storagePaths.isEmpty) {
+      return {
+        'deleted': 0,
+        'failed': 0,
+      };
+    }
+
+    int deletedCount = 0;
+    int failedCount = 0;
+    const chunkSize = 100;
+
+    for (
+    int start = 0;
+    start < storagePaths.length;
+    start += chunkSize
+    ) {
+      final end = (start + chunkSize) > storagePaths.length
+          ? storagePaths.length
+          : start + chunkSize;
+
+      final chunk = storagePaths.sublist(
+        start,
+        end,
+      );
+
+      try {
+        await supabase.storage
+            .from('vehicle-photos')
+            .remove(chunk);
+
+        deletedCount += chunk.length;
+      } catch (error, stackTrace) {
+        failedCount += chunk.length;
+
+        debugPrint(
+          'Vehicle Storage cleanup failed: $error',
+        );
+
+        debugPrint(
+          stackTrace.toString(),
+        );
+      }
+    }
+
+    return {
+      'deleted': deletedCount,
+      'failed': failedCount,
+    };
   }
 
   Future<void> deleteVehicle(
@@ -1171,7 +1283,9 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
     vehicleId.trim();
 
     if (normalizedVehicleId.isEmpty) {
-      showMessage(
+      AppResultMessage.warning(
+        context,
+        message:
         'Vehicle information is missing.',
       );
       return;
@@ -1203,17 +1317,84 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
         );
       }
 
-      await loadData();
-
-      showMessage(
-        'Vehicle deleted successfully.',
+      final storagePaths =
+      getStoragePathsFromDeletionResult(
+        result,
       );
+
+      final cleanupResult =
+      await removeVehicleStorageFiles(
+        storagePaths,
+      );
+
+      try {
+        await fetchVehicles();
+        await fetchVehicleBookings();
+
+        if (mounted) {
+          setState(() {});
+        }
+      } catch (refreshError) {
+        debugPrint(
+          'Refresh vehicles after deletion failed: '
+              '$refreshError',
+        );
+      }
+
+      if (!mounted) return;
+
+      final deletedPhotoCount =
+          cleanupResult['deleted'] ?? 0;
+
+      final failedPhotoCount =
+          cleanupResult['failed'] ?? 0;
+
+      if (failedPhotoCount > 0) {
+        AppResultMessage.warning(
+          context,
+          message:
+          'Vehicle deleted, but '
+              '$failedPhotoCount photo(s) could not '
+              'be removed from Storage. '
+              '$deletedPhotoCount photo(s) were removed.',
+          duration:
+          const Duration(seconds: 5),
+        );
+      } else if (deletedPhotoCount > 0) {
+        AppResultMessage.success(
+          context,
+          message:
+          'Vehicle and $deletedPhotoCount '
+              'photo(s) deleted successfully.',
+        );
+      } else {
+        AppResultMessage.success(
+          context,
+          message:
+          'Vehicle deleted successfully.',
+        );
+      }
     } on PostgrestException catch (error) {
-      showMessage(
-        error.message,
-      );
+      if (mounted) {
+        AppResultMessage.error(
+          context,
+          message: error.message,
+        );
+      }
 
-      await loadData();
+      try {
+        await fetchVehicles();
+        await fetchVehicleBookings();
+
+        if (mounted) {
+          setState(() {});
+        }
+      } catch (refreshError) {
+        debugPrint(
+          'Refresh vehicles after failed deletion: '
+              '$refreshError',
+        );
+      }
     } catch (error, stackTrace) {
       debugPrint(
         'Delete customer vehicle failed: $error',
@@ -1223,11 +1404,16 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
         stackTrace.toString(),
       );
 
-      showMessage(
+      if (!mounted) return;
+
+      AppResultMessage.error(
+        context,
+        message:
         'Failed to delete vehicle: $error',
       );
     }
   }
+
 
   void showAddVehicleDialog() {
     final plateController =
@@ -1359,10 +1545,23 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
             '',
       );
 
+      final currentVerificationStatus =
+          vehicle['verification_status']
+              ?.toString() ??
+              'Pending Claim';
+
+      final isLinkedRecord =
+          currentVerificationStatus == 'Verified' ||
+              currentVerificationStatus ==
+                  'Link Record';
+
       showVehicleFormDialog(
         title: 'Edit Vehicle',
-        subtitle:
-        'Update vehicle information and manage uploaded photos.',
+        subtitle: isLinkedRecord
+            ? 'You can add or remove photos without changing the verified status. '
+            'Changing the plate number or car model will return this vehicle '
+            'to Pending Claim for admin verification.'
+            : 'Update vehicle information and manage uploaded photos.',
         plateController: plateController,
         modelController: modelController,
         buttonText: 'Save Changes',
@@ -2727,45 +2926,41 @@ class _MyVehiclesPageState extends State<MyVehiclesPage> {
 
                     Row(
                       children: [
-                        if (status !=
-                            'Verified' &&
-                            status !=
-                                'Link Record') ...[
-                          Expanded(
-                            child:
-                            ElevatedButton.icon(
-                              style:
-                              ElevatedButton
-                                  .styleFrom(
-                                backgroundColor:
-                                const Color(
-                                  0xFF339BFF,
-                                ),
-                                foregroundColor:
-                                Colors.white,
+                        Expanded(
+                          child:
+                          ElevatedButton.icon(
+                            style:
+                            ElevatedButton
+                                .styleFrom(
+                              backgroundColor:
+                              const Color(
+                                0xFF339BFF,
                               ),
-                              onPressed: () {
-                                Navigator.pop(
-                                  dialogContext,
-                                );
+                              foregroundColor:
+                              Colors.white,
+                            ),
+                            onPressed: () {
+                              Navigator.pop(
+                                dialogContext,
+                              );
 
-                                unawaited(
-                                  showEditVehicleDialog(
-                                    vehicle,
-                                  ),
-                                );
-                              },
-                              icon: const Icon(
-                                Icons.edit,
-                                size: 18,
-                              ),
-                              label: const Text(
-                                'Edit',
-                              ),
+                              unawaited(
+                                showEditVehicleDialog(
+                                  vehicle,
+                                ),
+                              );
+                            },
+                            icon: const Icon(
+                              Icons.edit,
+                              size: 18,
+                            ),
+                            label: const Text(
+                              'Edit / Photos',
                             ),
                           ),
-                          const SizedBox(width: 8),
-                        ],
+                        ),
+
+                        const SizedBox(width: 8),
 
                         Expanded(
                           child:

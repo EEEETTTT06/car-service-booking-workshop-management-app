@@ -105,7 +105,15 @@ class _VehicleManagementPageState
     try {
       final response = await supabase
           .from('vehicles')
-          .select()
+          .select('''
+            *,
+            customers(
+              customer_id,
+              name,
+              email,
+              phone
+            )
+          ''')
           .order(
         'created_at',
         ascending: false,
@@ -113,11 +121,37 @@ class _VehicleManagementPageState
 
       if (!mounted) return;
 
+      final rows =
+      List<Map<String, dynamic>>.from(
+        response,
+      );
+
+      /*
+       * Always display the latest customer name
+       * from the customers relation. This avoids
+       * showing an old copied customer_name value
+       * after the customer edits their profile.
+       */
+      for (final row in rows) {
+        final linkedCustomer =
+        row['customers'];
+
+        if (linkedCustomer is Map) {
+          final latestName =
+          linkedCustomer['name']
+              ?.toString()
+              .trim();
+
+          if (latestName != null &&
+              latestName.isNotEmpty) {
+            row['customer_name'] =
+                latestName;
+          }
+        }
+      }
+
       setState(() {
-        vehicles =
-        List<Map<String, dynamic>>.from(
-          response,
-        );
+        vehicles = rows;
       });
 
       tryOpenInitialVehicle();
@@ -250,6 +284,19 @@ class _VehicleManagementPageState
       callback: (payload) {
         debugPrint(
           'Admin vehicle changed: '
+              '${payload.eventType}',
+        );
+
+        refreshVehiclesFromRealtime();
+      },
+    )
+        .onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'customers',
+      callback: (payload) {
+        debugPrint(
+          'Customer profile changed: '
               '${payload.eventType}',
         );
 
@@ -746,6 +793,82 @@ class _VehicleManagementPageState
     );
   }
 
+
+  List<String> getStoragePathsFromDeletionResult(
+      Map<String, dynamic> result,
+      ) {
+    final rawPaths = result['storage_paths'];
+
+    if (rawPaths is! List) {
+      return <String>[];
+    }
+
+    final uniquePaths = <String>{};
+
+    for (final rawPath in rawPaths) {
+      final path = rawPath?.toString().trim() ?? '';
+
+      if (path.isNotEmpty) {
+        uniquePaths.add(path);
+      }
+    }
+
+    return uniquePaths.toList();
+  }
+
+  Future<Map<String, int>> removeVehicleStorageFiles(
+      List<String> storagePaths,
+      ) async {
+    if (storagePaths.isEmpty) {
+      return {
+        'deleted': 0,
+        'failed': 0,
+      };
+    }
+
+    int deletedCount = 0;
+    int failedCount = 0;
+    const chunkSize = 100;
+
+    for (
+    int start = 0;
+    start < storagePaths.length;
+    start += chunkSize
+    ) {
+      final end = (start + chunkSize) > storagePaths.length
+          ? storagePaths.length
+          : start + chunkSize;
+
+      final chunk = storagePaths.sublist(
+        start,
+        end,
+      );
+
+      try {
+        await supabase.storage
+            .from('vehicle-photos')
+            .remove(chunk);
+
+        deletedCount += chunk.length;
+      } catch (error, stackTrace) {
+        failedCount += chunk.length;
+
+        debugPrint(
+          'Vehicle Storage cleanup failed: $error',
+        );
+
+        debugPrint(
+          stackTrace.toString(),
+        );
+      }
+    }
+
+    return {
+      'deleted': deletedCount,
+      'failed': failedCount,
+    };
+  }
+
   Future<void> deleteVehicle(
       String vehicleId,
       ) async {
@@ -753,7 +876,9 @@ class _VehicleManagementPageState
     vehicleId.trim();
 
     if (normalizedVehicleId.isEmpty) {
-      showMessage(
+      AppResultMessage.warning(
+        context,
+        message:
         'Vehicle information is missing.',
       );
       return;
@@ -785,17 +910,74 @@ class _VehicleManagementPageState
         );
       }
 
-      await fetchVehicles();
-
-      showMessage(
-        'Vehicle deleted successfully.',
+      final storagePaths =
+      getStoragePathsFromDeletionResult(
+        result,
       );
+
+      final cleanupResult =
+      await removeVehicleStorageFiles(
+        storagePaths,
+      );
+
+      try {
+        await fetchVehicles();
+      } catch (refreshError) {
+        debugPrint(
+          'Refresh admin vehicles after deletion failed: '
+              '$refreshError',
+        );
+      }
+
+      if (!mounted) return;
+
+      final deletedPhotoCount =
+          cleanupResult['deleted'] ?? 0;
+
+      final failedPhotoCount =
+          cleanupResult['failed'] ?? 0;
+
+      if (failedPhotoCount > 0) {
+        AppResultMessage.warning(
+          context,
+          message:
+          'Vehicle deleted, but '
+              '$failedPhotoCount photo(s) could not '
+              'be removed from Storage. '
+              '$deletedPhotoCount photo(s) were removed.',
+          duration:
+          const Duration(seconds: 5),
+        );
+      } else if (deletedPhotoCount > 0) {
+        AppResultMessage.success(
+          context,
+          message:
+          'Vehicle and $deletedPhotoCount '
+              'photo(s) deleted successfully.',
+        );
+      } else {
+        AppResultMessage.success(
+          context,
+          message:
+          'Vehicle deleted successfully.',
+        );
+      }
     } on PostgrestException catch (error) {
-      showMessage(
-        error.message,
-      );
+      if (mounted) {
+        AppResultMessage.error(
+          context,
+          message: error.message,
+        );
+      }
 
-      await fetchVehicles();
+      try {
+        await fetchVehicles();
+      } catch (refreshError) {
+        debugPrint(
+          'Refresh admin vehicles after failed deletion: '
+              '$refreshError',
+        );
+      }
     } catch (error, stackTrace) {
       debugPrint(
         'Admin delete vehicle failed: $error',
@@ -805,11 +987,16 @@ class _VehicleManagementPageState
         stackTrace.toString(),
       );
 
-      showMessage(
+      if (!mounted) return;
+
+      AppResultMessage.error(
+        context,
+        message:
         'Failed to delete vehicle: $error',
       );
     }
   }
+
 
   void showAddVehicleDialog() {
     final plateController = TextEditingController();
@@ -1083,121 +1270,17 @@ class _VehicleManagementPageState
     );
   }
 
-  Future<Map<String, dynamic>?> showCustomerSearchDialog() async {
-    final searchController = TextEditingController();
-    List<Map<String, dynamic>> customerResults = [];
-    bool isSearching = false;
-
-    return showDialog<Map<String, dynamic>>(
+  Future<Map<String, dynamic>?>
+  showCustomerSearchDialog() {
+    return showModalBottomSheet<
+        Map<String, dynamic>>(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            Future<void> doSearch(String value) async {
-              setDialogState(() {
-                isSearching = true;
-              });
-
-              try {
-                final result = await searchCustomers(value.trim());
-
-                setDialogState(() {
-                  customerResults = result;
-                });
-              } catch (error) {
-                showMessage('Failed to search customers: $error');
-              } finally {
-                setDialogState(() {
-                  isSearching = false;
-                });
-              }
-            }
-
-            return AlertDialog(
-              title: const Text('Search Customer'),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              content: SizedBox(
-                width: 420,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Type customer name',
-                        prefixIcon: const Icon(Icons.search),
-                        filled: true,
-                        fillColor: Colors.grey.shade100,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      onChanged: doSearch,
-                    ),
-                    const SizedBox(height: 14),
-                    if (isSearching)
-                      const Padding(
-                        padding: EdgeInsets.all(20),
-                        child: CircularProgressIndicator(),
-                      )
-                    else if (customerResults.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Text(
-                          'Type customer name to search.',
-                          style: TextStyle(color: Colors.black54),
-                        ),
-                      )
-                    else
-                      SizedBox(
-                        height: 260,
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: customerResults.length,
-                          itemBuilder: (context, index) {
-                            final customer = customerResults[index];
-
-                            return Card(
-                              child: ListTile(
-                                leading: const CircleAvatar(
-                                  backgroundColor: Color(0xFFD7E5FA),
-                                  child: Icon(
-                                    Icons.person,
-                                    color: Color(0xFF339BFF),
-                                  ),
-                                ),
-                                title: Text(
-                                  customer['name'] ?? '',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  '${customer['email'] ?? ''}\n${customer['phone'] ?? ''}',
-                                ),
-                                isThreeLine: true,
-                                onTap: () {
-                                  Navigator.pop(context, customer);
-                                },
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Close'),
-                ),
-              ],
-            );
-          },
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return _CustomerSearchSheet(
+          onSearch: searchCustomers,
         );
       },
     );
@@ -2633,3 +2716,459 @@ class _VehicleManagementPageState
     );
   }
 }
+
+class _CustomerSearchSheet extends StatefulWidget {
+  final Future<List<Map<String, dynamic>>> Function(
+      String keyword,
+      ) onSearch;
+
+  const _CustomerSearchSheet({
+    required this.onSearch,
+  });
+
+  @override
+  State<_CustomerSearchSheet> createState() =>
+      _CustomerSearchSheetState();
+}
+
+class _CustomerSearchSheetState
+    extends State<_CustomerSearchSheet> {
+  final TextEditingController searchController =
+  TextEditingController();
+
+  Timer? searchDebounce;
+
+  List<Map<String, dynamic>> customerResults = [];
+
+  bool isSearching = false;
+  bool hasSearched = false;
+  int searchRequestId = 0;
+
+  @override
+  void dispose() {
+    searchDebounce?.cancel();
+    searchController.dispose();
+    super.dispose();
+  }
+
+  void scheduleSearch(String value) {
+    searchDebounce?.cancel();
+
+    searchDebounce = Timer(
+      const Duration(milliseconds: 300),
+          () {
+        runSearch(value);
+      },
+    );
+  }
+
+  Future<void> runSearch(String value) async {
+    final keyword = value.trim();
+    final currentRequestId = ++searchRequestId;
+
+    if (keyword.isEmpty) {
+      if (!mounted) return;
+
+      setState(() {
+        customerResults = [];
+        isSearching = false;
+        hasSearched = false;
+      });
+
+      return;
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      isSearching = true;
+      hasSearched = true;
+    });
+
+    try {
+      final result = await widget.onSearch(
+        keyword,
+      );
+
+      if (!mounted ||
+          currentRequestId != searchRequestId) {
+        return;
+      }
+
+      setState(() {
+        customerResults = result;
+        isSearching = false;
+      });
+    } catch (error) {
+      if (!mounted ||
+          currentRequestId != searchRequestId) {
+        return;
+      }
+
+      setState(() {
+        isSearching = false;
+      });
+
+      AppResultMessage.show(
+        context,
+        message:
+        'Failed to search customers: $error',
+      );
+    }
+  }
+
+  void clearSearch() {
+    searchDebounce?.cancel();
+    ++searchRequestId;
+
+    searchController.clear();
+
+    setState(() {
+      customerResults = [];
+      isSearching = false;
+      hasSearched = false;
+    });
+  }
+
+  void selectCustomer(
+      Map<String, dynamic> customer,
+      ) {
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    /*
+     * Wait for the keyboard focus update before
+     * closing the route. The sheet State owns and
+     * disposes its controller only after the route
+     * is fully removed, avoiding framework
+     * dependency assertions during owner changes.
+     */
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      Navigator.of(context).pop(
+        customer,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardHeight =
+        mediaQuery.viewInsets.bottom;
+
+    final availableHeight =
+        mediaQuery.size.height -
+            keyboardHeight -
+            20;
+
+    final sheetHeight =
+    availableHeight > 580
+        ? 580.0
+        : availableHeight > 0
+        ? availableHeight
+        : 1.0;
+
+    return AnimatedPadding(
+      duration: const Duration(
+        milliseconds: 180,
+      ),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(
+        bottom: keyboardHeight,
+      ),
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: Material(
+          color: Colors.white,
+          elevation: 12,
+          borderRadius:
+          const BorderRadius.only(
+            topLeft: Radius.circular(26),
+            topRight: Radius.circular(26),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            width: double.infinity,
+            height: sheetHeight,
+            child: Column(
+              children: [
+                Padding(
+                  padding:
+                  const EdgeInsets.fromLTRB(
+                    20,
+                    12,
+                    12,
+                    0,
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius:
+                          BorderRadius.circular(
+                            20,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Search Customer',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: () {
+                              FocusManager.instance
+                                  .primaryFocus
+                                  ?.unfocus();
+
+                              Navigator.of(context)
+                                  .pop();
+                            },
+                            icon: const Icon(
+                              Icons.close,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding:
+                  const EdgeInsets.fromLTRB(
+                    20,
+                    8,
+                    20,
+                    12,
+                  ),
+                  child: TextField(
+                    controller: searchController,
+                    autofocus: true,
+                    textInputAction:
+                    TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText:
+                      'Type customer name',
+                      prefixIcon: const Icon(
+                        Icons.search,
+                      ),
+                      suffixIcon:
+                      searchController.text.isEmpty
+                          ? null
+                          : IconButton(
+                        tooltip: 'Clear',
+                        onPressed:
+                        clearSearch,
+                        icon: const Icon(
+                          Icons.clear,
+                        ),
+                      ),
+                      filled: true,
+                      fillColor:
+                      Colors.grey.shade100,
+                      border:
+                      OutlineInputBorder(
+                        borderRadius:
+                        BorderRadius.circular(
+                          16,
+                        ),
+                        borderSide:
+                        BorderSide.none,
+                      ),
+                    ),
+                    onChanged: (value) {
+                      setState(() {});
+                      scheduleSearch(value);
+                    },
+                    onSubmitted: runSearch,
+                  ),
+                ),
+                Expanded(
+                  child: isSearching
+                      ? const Center(
+                    child:
+                    CircularProgressIndicator(),
+                  )
+                      : !hasSearched
+                      ? const Center(
+                    child: Padding(
+                      padding:
+                      EdgeInsets.symmetric(
+                        horizontal: 24,
+                      ),
+                      child: Text(
+                        'Type a customer name to search.',
+                        textAlign:
+                        TextAlign.center,
+                        style: TextStyle(
+                          color:
+                          Colors.black54,
+                        ),
+                      ),
+                    ),
+                  )
+                      : customerResults.isEmpty
+                      ? const Center(
+                    child: Padding(
+                      padding:
+                      EdgeInsets
+                          .symmetric(
+                        horizontal: 24,
+                      ),
+                      child: Text(
+                        'No matching customer found.',
+                        textAlign:
+                        TextAlign
+                            .center,
+                        style:
+                        TextStyle(
+                          color: Colors
+                              .black54,
+                        ),
+                      ),
+                    ),
+                  )
+                      : ListView.builder(
+                    padding:
+                    const EdgeInsets
+                        .fromLTRB(
+                      16,
+                      0,
+                      16,
+                      18,
+                    ),
+                    keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior
+                        .onDrag,
+                    itemCount:
+                    customerResults
+                        .length,
+                    itemBuilder: (
+                        context,
+                        index,
+                        ) {
+                      final customer =
+                      customerResults[
+                      index];
+
+                      final name =
+                          customer['name']
+                              ?.toString() ??
+                              '';
+
+                      final email =
+                          customer['email']
+                              ?.toString() ??
+                              '';
+
+                      final phone =
+                          customer['phone']
+                              ?.toString() ??
+                              '';
+
+                      return Card(
+                        margin:
+                        const EdgeInsets
+                            .only(
+                          bottom: 10,
+                        ),
+                        child: ListTile(
+                          contentPadding:
+                          const EdgeInsets
+                              .symmetric(
+                            horizontal: 14,
+                            vertical: 6,
+                          ),
+                          leading:
+                          const CircleAvatar(
+                            backgroundColor:
+                            Color(
+                              0xFFD7E5FA,
+                            ),
+                            child: Icon(
+                              Icons.person,
+                              color: Color(
+                                0xFF339BFF,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            name,
+                            maxLines: 1,
+                            overflow:
+                            TextOverflow
+                                .ellipsis,
+                            style:
+                            const TextStyle(
+                              fontWeight:
+                              FontWeight
+                                  .bold,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+                            children: [
+                              const SizedBox(
+                                height: 3,
+                              ),
+                              if (email
+                                  .isNotEmpty)
+                                Text(
+                                  email,
+                                  maxLines:
+                                  1,
+                                  overflow:
+                                  TextOverflow
+                                      .ellipsis,
+                                ),
+                              if (phone
+                                  .isNotEmpty)
+                                Text(
+                                  phone,
+                                  maxLines:
+                                  1,
+                                  overflow:
+                                  TextOverflow
+                                      .ellipsis,
+                                ),
+                            ],
+                          ),
+                          trailing:
+                          const Icon(
+                            Icons
+                                .chevron_right,
+                          ),
+                          onTap: () {
+                            selectCustomer(
+                              customer,
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+

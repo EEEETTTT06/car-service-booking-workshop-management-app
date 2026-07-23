@@ -7,6 +7,7 @@ import 'customer_booking_calendar_page.dart';
 import '../../services/supabase_service.dart';
 import '../common/notification_bell.dart';
 import '../common/app_result_message.dart';
+
 class BookServicePage extends StatefulWidget {
   const BookServicePage({super.key});
 
@@ -14,7 +15,8 @@ class BookServicePage extends StatefulWidget {
   State<BookServicePage> createState() => _BookServicePageState();
 }
 
-class _BookServicePageState extends State<BookServicePage> {
+class _BookServicePageState extends State<BookServicePage>
+    with WidgetsBindingObserver {
   String selectedFilter = 'Upcoming';
   String selectedSort = 'Near to Far';
   bool isLoading = false;
@@ -24,11 +26,17 @@ class _BookServicePageState extends State<BookServicePage> {
   Map<String, dynamic>? currentCustomer;
   List<Map<String, dynamic>> bookings = [];
   RealtimeChannel? bookingRealtimeChannel;
+
+  Timer? realtimeRefreshTimer;
+
   bool isRealtimeRefreshing = false;
+  bool hasPendingRealtimeRefresh = false;
 
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
 
     loadBookings();
 
@@ -43,6 +51,15 @@ class _BookServicePageState extends State<BookServicePage> {
         });
       }
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(
+      AppLifecycleState state,
+      ) {
+    if (state == AppLifecycleState.resumed) {
+      scheduleRealtimeRefresh();
+    }
   }
 
   void scrollToTop() {
@@ -106,6 +123,7 @@ class _BookServicePageState extends State<BookServicePage> {
             service_type,
             status,
             note,
+            estimated_completion_at,
             updated_at
           )
         ''')
@@ -113,6 +131,7 @@ class _BookServicePageState extends State<BookServicePage> {
         .order('appointment_date', ascending: true);
 
     bookings = List<Map<String, dynamic>>.from(response);
+
   }
 
   void setupRealtimeSubscription() {
@@ -145,7 +164,7 @@ class _BookServicePageState extends State<BookServicePage> {
               '${payload.eventType}',
         );
 
-        refreshBookingsFromRealtime();
+        scheduleRealtimeRefresh();
       },
     )
         .onPostgresChanges(
@@ -158,28 +177,53 @@ class _BookServicePageState extends State<BookServicePage> {
               '${payload.eventType}',
         );
 
-        refreshBookingsFromRealtime();
+        scheduleRealtimeRefresh();
       },
     )
         .subscribe();
   }
 
+  void scheduleRealtimeRefresh() {
+    realtimeRefreshTimer?.cancel();
+
+    realtimeRefreshTimer = Timer(
+      const Duration(milliseconds: 350),
+      refreshBookingsFromRealtime,
+    );
+  }
+
   Future<void> refreshBookingsFromRealtime() async {
-    if (!mounted || isRealtimeRefreshing) {
+    if (!mounted) {
+      return;
+    }
+
+    if (isRealtimeRefreshing) {
+      hasPendingRealtimeRefresh = true;
       return;
     }
 
     isRealtimeRefreshing = true;
 
     try {
-      await fetchBookings();
+      do {
+        hasPendingRealtimeRefresh = false;
 
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (error) {
+        await fetchBookings();
+
+        if (mounted) {
+          setState(() {});
+        }
+      } while (
+      mounted &&
+          hasPendingRealtimeRefresh
+      );
+    } catch (error, stackTrace) {
       debugPrint(
         'Realtime booking refresh failed: $error',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
       );
     } finally {
       isRealtimeRefreshing = false;
@@ -291,28 +335,122 @@ class _BookServicePageState extends State<BookServicePage> {
     return normalizeRelatedRows(booking['pending_services']);
   }
 
-  String? getServiceProgress(Map<String, dynamic> booking) {
-    final pending = getPendingServices(booking);
+  Map<String, dynamic>? getLatestPendingService(
+      Map<String, dynamic> booking,
+      ) {
+    final pending = List<Map<String, dynamic>>.from(
+      getPendingServices(booking),
+    );
 
     if (pending.isEmpty) return null;
 
     pending.sort((a, b) {
-      final aDate = DateTime.tryParse(a['updated_at']?.toString() ?? '') ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      final bDate = DateTime.tryParse(b['updated_at']?.toString() ?? '') ??
-          DateTime.fromMillisecondsSinceEpoch(0);
+      final aDate =
+          DateTime.tryParse(
+            a['updated_at']?.toString() ?? '',
+          ) ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+
+      final bDate =
+          DateTime.tryParse(
+            b['updated_at']?.toString() ?? '',
+          ) ??
+              DateTime.fromMillisecondsSinceEpoch(0);
 
       return bDate.compareTo(aDate);
     });
 
-    return pending.first['status']?.toString();
+    return pending.first;
   }
 
-  String getDisplayStatus(Map<String, dynamic> booking) {
-    final bookingStatus =
-        booking['status']?.toString() ?? 'Booked';
+  String? getServiceProgress(
+      Map<String, dynamic> booking,
+      ) {
+    return getLatestPendingService(
+      booking,
+    )?['status']?.toString();
+  }
 
-    final progress = getServiceProgress(booking);
+  String? getEstimatedCompletionAt(
+      Map<String, dynamic> booking,
+      ) {
+    final value = getLatestPendingService(
+      booking,
+    )?['estimated_completion_at']
+        ?.toString()
+        .trim();
+
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+
+    return value;
+  }
+
+  String? getArrivedAt(
+      Map<String, dynamic> booking,
+      ) {
+    final value = booking['arrived_at']
+        ?.toString()
+        .trim();
+
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+
+    return value;
+  }
+
+  String formatDateTimeValue(
+      String? value, {
+        required String fallback,
+      }) {
+    if (value == null || value.trim().isEmpty) {
+      return fallback;
+    }
+
+    final parsed = DateTime.tryParse(value);
+
+    if (parsed == null) {
+      return fallback;
+    }
+
+    final local = parsed.toLocal();
+
+    final day =
+    local.day.toString().padLeft(2, '0');
+    final month =
+    local.month.toString().padLeft(2, '0');
+    final year = local.year.toString();
+
+    final minute =
+    local.minute.toString().padLeft(2, '0');
+
+    final isPm = local.hour >= 12;
+    final displayHour =
+    local.hour % 12 == 0
+        ? 12
+        : local.hour % 12;
+
+    final period = isPm ? 'PM' : 'AM';
+
+    return '$day/$month/$year '
+        '${displayHour.toString().padLeft(2, '0')}:'
+        '$minute $period';
+  }
+
+  String getDisplayStatus(
+      Map<String, dynamic> booking,
+      ) {
+    final bookingStatus =
+        booking['status']
+            ?.toString()
+            .trim() ??
+            'Booked';
+
+    final progress =
+    getServiceProgress(booking)
+        ?.trim();
 
     if (progress == 'Completed' ||
         bookingStatus == 'Completed') {
@@ -324,8 +462,22 @@ class _BookServicePageState extends State<BookServicePage> {
       return 'Cancelled';
     }
 
+    /*
+   * Once the vehicle has arrived, it remains
+   * inside the Arrived section while service
+   * progress changes.
+   */
+    if (bookingStatus == 'Arrived' ||
+        progress == 'Arrived' ||
+        progress == 'Waiting Fix' ||
+        progress == 'Waiting to Fix' ||
+        progress == 'In Progress') {
+      return 'Arrived';
+    }
+
     if (isPastBooking(
-      booking['appointment_date'].toString(),
+      booking['appointment_date']
+          .toString(),
     ) &&
         bookingStatus != 'Arrived' &&
         bookingStatus != 'Completed') {
@@ -335,10 +487,13 @@ class _BookServicePageState extends State<BookServicePage> {
     return 'Upcoming';
   }
 
-  List<Map<String, dynamic>> get filteredBookings {
-    final result = bookings.where((booking) {
-      return getDisplayStatus(booking) == selectedFilter;
-    }).toList();
+  List<Map<String, dynamic>> sortBookingList(
+      List<Map<String, dynamic>> source,
+      ) {
+    final result =
+    List<Map<String, dynamic>>.from(
+      source,
+    );
 
     result.sort((a, b) {
       final aDate = parseDate(
@@ -371,17 +526,39 @@ class _BookServicePageState extends State<BookServicePage> {
       aDistance.compareTo(bDistance);
 
       if (distanceComparison != 0) {
-        return selectedSort == 'Near to Far'
+        return selectedSort ==
+            'Near to Far'
             ? distanceComparison
             : -distanceComparison;
       }
 
-      return selectedSort == 'Near to Far'
+      return selectedSort ==
+          'Near to Far'
           ? aDate.compareTo(bDate)
           : bDate.compareTo(aDate);
     });
 
     return result;
+  }
+
+  List<Map<String, dynamic>>
+  get filteredBookings {
+    final result = bookings.where((booking) {
+      return getDisplayStatus(booking) ==
+          selectedFilter;
+    }).toList();
+
+    return sortBookingList(result);
+  }
+
+  List<Map<String, dynamic>>
+  get cancelledBookings {
+    final result = bookings.where((booking) {
+      return getDisplayStatus(booking) ==
+          'Cancelled';
+    }).toList();
+
+    return sortBookingList(result);
   }
 
   int getStatusCount(String filter) {
@@ -397,14 +574,14 @@ class _BookServicePageState extends State<BookServicePage> {
 
     return bookingServices
         .map<Map<String, dynamic>?>((item) {
-          final service = item['services'];
+      final service = item['services'];
 
-          if (service is Map) {
-            return Map<String, dynamic>.from(service);
-          }
+      if (service is Map) {
+        return Map<String, dynamic>.from(service);
+      }
 
-          return null;
-        })
+      return null;
+    })
         .whereType<Map<String, dynamic>>()
         .toList();
   }
@@ -420,27 +597,78 @@ class _BookServicePageState extends State<BookServicePage> {
   }
 
   Color getStatusColor(String status) {
-    if (status == 'Booked') return Colors.blue;
-    if (status == 'Approved') return Colors.green;
-    if (status == 'Rejected') return Colors.red;
-    if (status == 'Arrived') return Colors.orange;
-    if (status == 'Completed') return Colors.green;
-    if (status == 'Cancelled') return Colors.red;
+    if (status == 'Booked') {
+      return Colors.blue;
+    }
+
+    if (status == 'Approved') {
+      return Colors.green;
+    }
+
+    if (status == 'Arrived') {
+      return Colors.orange;
+    }
+
+    if (status == 'Waiting Fix' ||
+        status == 'Waiting to Fix') {
+      return Colors.orange;
+    }
+
+    if (status == 'In Progress') {
+      return Colors.blue;
+    }
+
+    if (status == 'Completed') {
+      return Colors.green;
+    }
+
+    if (status == 'Rejected' ||
+        status == 'Cancelled') {
+      return Colors.red;
+    }
+
     return Colors.grey;
   }
 
-  Color getStatusBackgroundColor(String status) {
-    if (status == 'Booked') return Colors.blue.shade50;
-    if (status == 'Approved') return Colors.green.shade50;
-    if (status == 'Rejected') return Colors.red.shade50;
-    if (status == 'Arrived') return Colors.orange.shade50;
-    if (status == 'Completed') return Colors.green.shade50;
-    if (status == 'Cancelled') return Colors.red.shade50;
+  Color getStatusBackgroundColor(
+      String status,
+      ) {
+    if (status == 'Booked') {
+      return Colors.blue.shade50;
+    }
+
+    if (status == 'Approved') {
+      return Colors.green.shade50;
+    }
+
+    if (status == 'Arrived') {
+      return Colors.orange.shade50;
+    }
+
+    if (status == 'Waiting Fix' ||
+        status == 'Waiting to Fix') {
+      return Colors.orange.shade50;
+    }
+
+    if (status == 'In Progress') {
+      return Colors.blue.shade50;
+    }
+
+    if (status == 'Completed') {
+      return Colors.green.shade50;
+    }
+
+    if (status == 'Rejected' ||
+        status == 'Cancelled') {
+      return Colors.red.shade50;
+    }
+
     return Colors.grey.shade100;
   }
 
   Color getProgressColor(String status) {
-    if (status == 'Waiting Fix') {
+    if (status == 'Waiting Fix' ||
+        status == 'Waiting to Fix') {
       return Colors.orange;
     }
 
@@ -456,7 +684,8 @@ class _BookServicePageState extends State<BookServicePage> {
   }
 
   Color getProgressBackgroundColor(String status) {
-    if (status == 'Waiting Fix') {
+    if (status == 'Waiting Fix' ||
+        status == 'Waiting to Fix') {
       return Colors.orange.shade50;
     }
 
@@ -472,7 +701,8 @@ class _BookServicePageState extends State<BookServicePage> {
   }
 
   IconData getProgressIcon(String status) {
-    if (status == 'Waiting Fix') {
+    if (status == 'Waiting Fix' ||
+        status == 'Waiting to Fix') {
       return Icons.pending_actions;
     }
 
@@ -889,10 +1119,17 @@ class _BookServicePageState extends State<BookServicePage> {
             status != 'Rejected' &&
             status != 'Completed';
 
-    final displayedStatus = progress == 'Completed'
+    final bookingCategory =
+    getDisplayStatus(booking);
+
+    final displayedStatus =
+    progress == 'Completed'
         ? 'Completed'
         : isAutoCancelled
         ? 'Cancelled'
+        : bookingCategory == 'Arrived' &&
+        progress != null
+        ? progress
         : status;
 
     final date = formatDate(
@@ -901,6 +1138,27 @@ class _BookServicePageState extends State<BookServicePage> {
     final problem = booking['problem_description'] ?? '';
     final rejectionReason = booking['rejection_reason'] ?? '';
     final total = getTotalPrice(booking);
+
+    final arrivedAt = getArrivedAt(booking);
+    final estimatedCompletionAt =
+    getEstimatedCompletionAt(booking);
+
+    final showServiceTiming =
+        bookingCategory == 'Arrived' ||
+            arrivedAt != null ||
+            estimatedCompletionAt != null;
+
+    final arrivedTimeText =
+    formatDateTimeValue(
+      arrivedAt,
+      fallback: 'Not Recorded',
+    );
+
+    final estimatedCompletionText =
+    formatDateTimeValue(
+      estimatedCompletionAt,
+      fallback: 'Not Provided Yet',
+    );
 
     showDialog(
       context: context,
@@ -927,6 +1185,16 @@ class _BookServicePageState extends State<BookServicePage> {
                     'Booking Status',
                     displayedStatus,
                   ),
+                  if (showServiceTiming)
+                    buildDetailBox(
+                      'Arrived Time',
+                      arrivedTimeText,
+                    ),
+                  if (showServiceTiming)
+                    buildDetailBox(
+                      'Estimated Completion',
+                      estimatedCompletionText,
+                    ),
                   if (status == 'Rejected' &&
                       rejectionReason.toString().isNotEmpty)
                     buildRejectReasonBox(rejectionReason.toString()),
@@ -1331,6 +1599,81 @@ class _BookServicePageState extends State<BookServicePage> {
     );
   }
 
+  Widget buildServiceTimingBox({
+    required String arrivedTime,
+    required String estimatedCompletionTime,
+  }) {
+    Widget buildTimeRow({
+      required IconData icon,
+      required String title,
+      required String value,
+    }) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            icon,
+            size: 19,
+            color: const Color(0xFF339BFF),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.black54,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: Color(0xFF1F2937),
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F9FF),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFF339BFF)
+              .withOpacity(0.25),
+        ),
+      ),
+      child: Column(
+        children: [
+          buildTimeRow(
+            icon: Icons.login,
+            title: 'Arrived Time',
+            value: arrivedTime,
+          ),
+          const SizedBox(height: 11),
+          const Divider(height: 1),
+          const SizedBox(height: 11),
+          buildTimeRow(
+            icon: Icons.schedule,
+            title: 'Estimated Completion',
+            value: estimatedCompletionTime,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget buildDetailBox(String title, String value) {
     return Container(
       width: double.infinity,
@@ -1613,11 +1956,31 @@ class _BookServicePageState extends State<BookServicePage> {
         status != 'Cancelled' &&
         status != 'Rejected' &&
         status != 'Completed';
-    final displayedStatus = progress == 'Completed'
+    final bookingCategory =
+    getDisplayStatus(booking);
+
+    final displayedStatus =
+    progress == 'Completed'
         ? 'Completed'
         : isAutoCancelled
         ? 'Cancelled'
+        : bookingCategory == 'Arrived' &&
+        progress != null
+        ? progress
         : status;
+
+    final arrivedTimeText =
+    formatDateTimeValue(
+      getArrivedAt(booking),
+      fallback: 'Not Recorded',
+    );
+
+    final estimatedCompletionText =
+    formatDateTimeValue(
+      getEstimatedCompletionAt(booking),
+      fallback: 'Not Provided Yet',
+    );
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -1726,6 +2089,14 @@ class _BookServicePageState extends State<BookServicePage> {
                   ),
                 ],
               ),
+              if (bookingCategory == 'Arrived') ...[
+                const SizedBox(height: 12),
+                buildServiceTimingBox(
+                  arrivedTime: arrivedTimeText,
+                  estimatedCompletionTime:
+                  estimatedCompletionText,
+                ),
+              ],
               if (status == 'Rejected' &&
                   rejectionReason.toString().isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -1803,6 +2174,12 @@ class _BookServicePageState extends State<BookServicePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(
+      this,
+    );
+
+    realtimeRefreshTimer?.cancel();
+
     final channel = bookingRealtimeChannel;
 
     if (channel != null) {
@@ -1818,6 +2195,7 @@ class _BookServicePageState extends State<BookServicePage> {
   @override
   Widget build(BuildContext context) {
     final displayBookings = filteredBookings;
+    final displayCancelledBookings = cancelledBookings;
 
     return Scaffold(
       backgroundColor: const Color(0xFFD7E5FA),
@@ -1827,7 +2205,6 @@ class _BookServicePageState extends State<BookServicePage> {
         backgroundColor: const Color(0xFF339BFF),
         foregroundColor: Colors.white,
         elevation: 0,
-
         actions: const [
           NotificationBell(
             isAdmin: false,
@@ -1871,9 +2248,7 @@ class _BookServicePageState extends State<BookServicePage> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-
                     const SizedBox(height: 6),
-
                     const Text(
                       'View and manage your workshop appointments',
                       style: TextStyle(
@@ -1881,9 +2256,7 @@ class _BookServicePageState extends State<BookServicePage> {
                         fontSize: 14,
                       ),
                     ),
-
                     const SizedBox(height: 16),
-
                     Row(
                       children: [
                         buildSummaryCard(
@@ -1893,9 +2266,9 @@ class _BookServicePageState extends State<BookServicePage> {
                         ),
                         const SizedBox(width: 12),
                         buildSummaryCard(
-                          icon: Icons.check_circle,
-                          title: 'Completed',
-                          value: '${getStatusCount('Completed')}',
+                          icon: Icons.car_repair,
+                          title: 'Arrived',
+                          value: '${getStatusCount('Arrived')}',
                         ),
                       ],
                     ),
@@ -1903,11 +2276,9 @@ class _BookServicePageState extends State<BookServicePage> {
                 ),
               ),
             ),
-
             const SliverToBoxAdapter(
               child: SizedBox(height: 16),
             ),
-
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -1916,19 +2287,17 @@ class _BookServicePageState extends State<BookServicePage> {
                 child: Row(
                   children: [
                     buildFilterButton('Upcoming'),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
+                    buildFilterButton('Arrived'),
+                    const SizedBox(width: 8),
                     buildFilterButton('Completed'),
-                    const SizedBox(width: 10),
-                    buildFilterButton('Cancelled'),
                   ],
                 ),
               ),
             ),
-
             const SliverToBoxAdapter(
               child: SizedBox(height: 12),
             ),
-
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -1937,20 +2306,109 @@ class _BookServicePageState extends State<BookServicePage> {
                 child: buildSortControl(),
               ),
             ),
-
             const SliverToBoxAdapter(
               child: SizedBox(height: 16),
             ),
-
             if (displayBookings.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(
-                  child: Text(
-                    'No $selectedFilter bookings.',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: Colors.black54,
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 35,
+                  ),
+                  child: Center(
+                    child: Text(
+                      'No $selectedFilter bookings.',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  0,
+                ),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                      return buildBookingCard(
+                        displayBookings[index],
+                      );
+                    },
+                    childCount: displayBookings.length,
+                  ),
+                ),
+              ),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 28),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.cancel_outlined,
+                      color: Colors.red,
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Cancelled Bookings',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1F2937),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${displayCancelledBookings.length}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 12),
+            ),
+            if (displayCancelledBookings.isEmpty)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 20,
+                  ),
+                  child: Center(
+                    child: Text(
+                      'No cancelled bookings.',
+                      style: TextStyle(
+                        color: Colors.black54,
+                      ),
                     ),
                   ),
                 ),
@@ -1966,11 +2424,11 @@ class _BookServicePageState extends State<BookServicePage> {
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                         (context, index) {
-                      final booking = displayBookings[index];
-
-                      return buildBookingCard(booking);
+                      return buildBookingCard(
+                        displayCancelledBookings[index],
+                      );
                     },
-                    childCount: displayBookings.length,
+                    childCount: displayCancelledBookings.length,
                   ),
                 ),
               ),
@@ -1992,10 +2450,8 @@ class _BookServicePageState extends State<BookServicePage> {
                 Icons.keyboard_arrow_up,
               ),
             ),
-
           if (showBackToTop)
             const SizedBox(height: 12),
-
           FloatingActionButton.extended(
             heroTag: 'bookServiceNewBooking',
             backgroundColor: const Color(0xFF339BFF),
