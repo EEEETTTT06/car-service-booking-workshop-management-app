@@ -25,6 +25,7 @@ class _ProfilePageState extends State<ProfilePage> {
   String customerName = 'Customer';
   String customerEmail = '';
   String customerPhone = 'Not Provided';
+  String profileImageUrl = '';
   int totalVehicles = 0;
 
   String workshopName = 'SF Service Centre';
@@ -80,6 +81,7 @@ class _ProfilePageState extends State<ProfilePage> {
             'phone': customerPhone == 'Not Provided'
                 ? ''
                 : customerPhone,
+            'profile_image_url': profileImageUrl,
           },
           onProfileUpdated: (updatedProfile) {
             if (!mounted) return;
@@ -91,6 +93,9 @@ class _ProfilePageState extends State<ProfilePage> {
                   updatedProfile['email'] ?? customerEmail;
               customerPhone =
                   updatedProfile['phone'] ?? customerPhone;
+              profileImageUrl =
+                  updatedProfile['profile_image_url'] ??
+                      profileImageUrl;
             });
           },
         ),
@@ -172,6 +177,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
         customerPhone =
             (customerResponse['phone'] ?? 'Not Provided').toString();
+
+        profileImageUrl =
+            (customerResponse['profile_image_url'] ?? '')
+                .toString()
+                .trim();
 
         notificationOn =
             customerResponse['notification_enabled'] ?? true;
@@ -646,6 +656,251 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Widget buildCustomerProfileImage({
+    required double size,
+  }) {
+    if (profileImageUrl.trim().isEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        color: const Color(0xFFD7E5FA),
+        child: Icon(
+          Icons.person,
+          size: size * 0.58,
+          color: const Color(0xFF339BFF),
+        ),
+      );
+    }
+
+    return Image.network(
+      profileImageUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (
+          context,
+          error,
+          stackTrace,
+          ) {
+        return Container(
+          width: size,
+          height: size,
+          color: const Color(0xFFD7E5FA),
+          child: Icon(
+            Icons.person,
+            size: size * 0.58,
+            color: const Color(0xFF339BFF),
+          ),
+        );
+      },
+    );
+  }
+
+  void showCustomerProfilePicturePreview() {
+    if (profileImageUrl.trim().isEmpty) {
+      showMessage(
+        'No profile picture has been added yet.',
+      );
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) {
+        final screenSize =
+            MediaQuery.of(dialogContext).size;
+
+        final previewSize =
+        screenSize.width < 520
+            ? screenSize.width - 34
+            : 470.0;
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(17),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Hero(
+                tag: 'customer-main-profile-picture',
+                child: Container(
+                  width: previewSize,
+                  height: previewSize,
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius:
+                    BorderRadius.circular(26),
+                    boxShadow: [
+                      BoxShadow(
+                        color:
+                        Colors.black.withOpacity(0.36),
+                        blurRadius: 28,
+                        offset:
+                        const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: InteractiveViewer(
+                    minScale: 1,
+                    maxScale: 4,
+                    child: Image.network(
+                      profileImageUrl,
+                      width: previewSize,
+                      height: previewSize,
+                      fit: BoxFit.contain,
+                      errorBuilder: (
+                          context,
+                          error,
+                          stackTrace,
+                          ) {
+                        return const Center(
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            color: Colors.white54,
+                            size: 70,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Material(
+                  color: Colors.black54,
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    tooltip: 'Close',
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                    },
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 18,
+                right: 18,
+                bottom: 18,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius:
+                    BorderRadius.circular(14),
+                  ),
+                  child: const Text(
+                    'Pinch to zoom the profile picture',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget buildCustomerProfileAvatar() {
+    return Column(
+      children: [
+        Hero(
+          tag: 'customer-main-profile-picture',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: profileImageUrl.trim().isEmpty
+                  ? goToEditProfile
+                  : showCustomerProfilePicturePreview,
+              child: Container(
+                width: 114,
+                height: 114,
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color:
+                      Colors.black.withOpacity(0.15),
+                      blurRadius: 17,
+                      offset: const Offset(0, 7),
+                    ),
+                  ],
+                ),
+                child: ClipOval(
+                  child: buildCustomerProfileImage(
+                    size: 104,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: profileImageUrl.trim().isEmpty
+              ? goToEditProfile
+              : showCustomerProfilePicturePreview,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 13,
+              vertical: 7,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.24),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  profileImageUrl.trim().isEmpty
+                      ? Icons.add_a_photo_outlined
+                      : Icons.zoom_out_map_rounded,
+                  color: Colors.white,
+                  size: 16,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  profileImageUrl.trim().isEmpty
+                      ? 'Add Profile Picture'
+                      : 'Tap to View Picture',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -683,19 +938,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
                 child: Column(
                   children: [
-                    const CircleAvatar(
-                      radius: 52,
-                      backgroundColor: Colors.white,
-                      child: CircleAvatar(
-                        radius: 47,
-                        backgroundColor: Color(0xFFD7E5FA),
-                        child: Icon(
-                          Icons.person,
-                          size: 58,
-                          color: Color(0xFF339BFF),
-                        ),
-                      ),
-                    ),
+                    buildCustomerProfileAvatar(),
                     const SizedBox(height: 16),
                     Text(
                       customerName,

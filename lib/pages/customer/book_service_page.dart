@@ -1108,55 +1108,199 @@ class _BookServicePageState extends State<BookServicePage>
     return status == 'Booked';
   }
 
+  bool canCancelBookingByDate(
+      Map<String, dynamic> booking,
+      ) {
+    final appointmentDate = DateTime.tryParse(
+      booking['appointment_date']
+          ?.toString() ??
+          '',
+    );
+
+    if (appointmentDate == null) {
+      return false;
+    }
+
+    final now = DateTime.now();
+
+    final todayOnly = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
+    final appointmentOnly = DateTime(
+      appointmentDate.year,
+      appointmentDate.month,
+      appointmentDate.day,
+    );
+
+    return appointmentOnly
+        .difference(todayOnly)
+        .inDays >=
+        3;
+  }
+
+  int getDaysUntilBooking(
+      Map<String, dynamic> booking,
+      ) {
+    final appointmentDate = DateTime.tryParse(
+      booking['appointment_date']
+          ?.toString() ??
+          '',
+    );
+
+    if (appointmentDate == null) {
+      return 0;
+    }
+
+    final now = DateTime.now();
+
+    final todayOnly = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
+    final appointmentOnly = DateTime(
+      appointmentDate.year,
+      appointmentDate.month,
+      appointmentDate.day,
+    );
+
+    return appointmentOnly
+        .difference(todayOnly)
+        .inDays;
+  }
+
   Future<void> notifyAdminsAboutCancelledBooking({
     required Map<String, dynamic> booking,
   }) async {
     try {
-      final vehicle = booking['vehicles'] ?? {};
-      final customerName = currentCustomer?['name'] ?? 'A customer';
-      final plate = vehicle['plate_number'] ?? 'Unknown Vehicle';
-      final date = formatDate(booking['appointment_date'].toString());
+      final vehicle =
+          booking['vehicles'] ?? {};
+
+      final customerName =
+          currentCustomer?['name'] ??
+              'A customer';
+
+      final plate =
+          vehicle['plate_number'] ??
+              'Unknown Vehicle';
+
+      final date = formatDate(
+        booking['appointment_date']
+            .toString(),
+      );
+
+      final bookingId =
+      booking['booking_id']
+          ?.toString()
+          .trim();
+
+      final vehicleId =
+      booking['vehicle_id']
+          ?.toString()
+          .trim();
+
+      final customerId =
+      currentCustomer?['customer_id']
+          ?.toString()
+          .trim();
 
       const title = 'Booking Cancelled';
-      final body = '$customerName cancelled booking for $plate on $date.';
+      const notificationType = 'booking';
+      const targetPage = 'admin_bookings';
+
+      final body =
+          '$customerName cancelled booking for '
+          '$plate on $date.';
 
       final admins = await supabase
           .from('admins')
-          .select('admin_id, notification_enabled');
+          .select(
+        'admin_id, notification_enabled',
+      );
 
       for (final admin in admins) {
-        await supabase.from('admin_notifications').insert({
+        await supabase
+            .from('admin_notifications')
+            .insert({
           'admin_id': admin['admin_id'],
           'title': title,
           'message': body,
           'is_read': false,
-          'notification_type': 'booking',
+          'notification_type':
+          notificationType,
+          'target_page': targetPage,
+          'booking_id': bookingId,
+          'vehicle_id': vehicleId,
+          'customer_id': customerId,
         });
       }
 
       final enabledAdminIds = admins
-          .where((admin) => admin['notification_enabled'] != false)
-          .map((admin) => admin['admin_id'])
+          .where(
+            (admin) =>
+        admin[
+        'notification_enabled'] !=
+            false,
+      )
+          .map(
+            (admin) => admin['admin_id'],
+      )
           .toList();
 
-      if (enabledAdminIds.isEmpty) return;
+      if (enabledAdminIds.isEmpty) {
+        return;
+      }
 
       final tokens = await supabase
           .from('admin_fcm_tokens')
           .select('fcm_token, admin_id')
-          .inFilter('admin_id', enabledAdminIds);
+          .inFilter(
+        'admin_id',
+        enabledAdminIds,
+      );
 
       for (final row in tokens) {
         final token = row['fcm_token'];
-        if (token == null || token.toString().isEmpty) continue;
+
+        if (token == null ||
+            token.toString().isEmpty) {
+          continue;
+        }
 
         await supabase.functions.invoke(
           'send-fcm',
-          body: {'token': token, 'title': title, 'body': body},
+          body: {
+            'token': token,
+            'title': title,
+            'body': body,
+            'data': {
+              'target_page': targetPage,
+              'notification_type':
+              notificationType,
+              if (bookingId != null &&
+                  bookingId.isNotEmpty)
+                'booking_id': bookingId,
+              if (vehicleId != null &&
+                  vehicleId.isNotEmpty)
+                'vehicle_id': vehicleId,
+              if (customerId != null &&
+                  customerId.isNotEmpty)
+                'customer_id': customerId,
+            },
+          },
         );
       }
-    } catch (error) {
-      debugPrint('Cancel booking notify admin error: $error');
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Cancel booking notify admin error: '
+            '$error',
+      );
+
+      debugPrint(stackTrace.toString());
     }
   }
 
@@ -1266,53 +1410,132 @@ class _BookServicePageState extends State<BookServicePage>
     required DateTime newDate,
   }) async {
     try {
-      final vehicle = booking['vehicles'] ?? {};
-      final customerName = currentCustomer?['name'] ?? 'A customer';
-      final plate = vehicle['plate_number'] ?? 'Unknown Vehicle';
-      final date = formatDate(toSqlDate(newDate));
+      final vehicle =
+          booking['vehicles'] ?? {};
+
+      final customerName =
+          currentCustomer?['name'] ??
+              'A customer';
+
+      final plate =
+          vehicle['plate_number'] ??
+              'Unknown Vehicle';
+
+      final date = formatDate(
+        toSqlDate(newDate),
+      );
+
+      final bookingId =
+      booking['booking_id']
+          ?.toString()
+          .trim();
+
+      final vehicleId =
+      booking['vehicle_id']
+          ?.toString()
+          .trim();
+
+      final customerId =
+      currentCustomer?['customer_id']
+          ?.toString()
+          .trim();
 
       const title = 'Booking Updated';
-      final body = '$customerName updated booking for $plate to $date.';
+      const notificationType = 'booking';
+      const targetPage = 'admin_bookings';
+
+      final body =
+          '$customerName updated booking for '
+          '$plate to $date.';
 
       final admins = await supabase
           .from('admins')
-          .select('admin_id, notification_enabled');
+          .select(
+        'admin_id, notification_enabled',
+      );
 
       for (final admin in admins) {
-        await supabase.from('admin_notifications').insert({
+        await supabase
+            .from('admin_notifications')
+            .insert({
           'admin_id': admin['admin_id'],
           'title': title,
           'message': body,
           'is_read': false,
-          'notification_type': 'booking',
+          'notification_type':
+          notificationType,
+          'target_page': targetPage,
+          'booking_id': bookingId,
+          'vehicle_id': vehicleId,
+          'customer_id': customerId,
         });
       }
 
       final enabledAdminIds = admins
-          .where((admin) => admin['notification_enabled'] != false)
-          .map((admin) => admin['admin_id'])
+          .where(
+            (admin) =>
+        admin[
+        'notification_enabled'] !=
+            false,
+      )
+          .map(
+            (admin) => admin['admin_id'],
+      )
           .toList();
 
-      if (enabledAdminIds.isEmpty) return;
+      if (enabledAdminIds.isEmpty) {
+        return;
+      }
 
       final tokens = await supabase
           .from('admin_fcm_tokens')
           .select('fcm_token, admin_id')
-          .inFilter('admin_id', enabledAdminIds);
+          .inFilter(
+        'admin_id',
+        enabledAdminIds,
+      );
 
       for (final row in tokens) {
         final token = row['fcm_token'];
-        if (token == null || token.toString().isEmpty) continue;
+
+        if (token == null ||
+            token.toString().isEmpty) {
+          continue;
+        }
 
         await supabase.functions.invoke(
           'send-fcm',
-          body: {'token': token, 'title': title, 'body': body},
+          body: {
+            'token': token,
+            'title': title,
+            'body': body,
+            'data': {
+              'target_page': targetPage,
+              'notification_type':
+              notificationType,
+              if (bookingId != null &&
+                  bookingId.isNotEmpty)
+                'booking_id': bookingId,
+              if (vehicleId != null &&
+                  vehicleId.isNotEmpty)
+                'vehicle_id': vehicleId,
+              if (customerId != null &&
+                  customerId.isNotEmpty)
+                'customer_id': customerId,
+            },
+          },
         );
       }
-    } catch (error) {
-      debugPrint('Update booking notify admin error: $error');
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Update booking notify admin error: '
+            '$error',
+      );
+
+      debugPrint(stackTrace.toString());
     }
   }
+
   Future<void> updateBooking({
     required Map<String, dynamic> booking,
     required DateTime newDate,
@@ -1489,20 +1712,32 @@ class _BookServicePageState extends State<BookServicePage>
     await loadBookings();
   }
 
-  void showBookingDetailDialog(Map<String, dynamic> booking) {
-    final vehicle = booking['vehicles'] ?? {};
-    final services = getServices(booking);
-    final isWalkIn = isWalkInEntry(booking);
-    final status =
-        booking['status']?.toString() ?? 'Booked';
+  void showBookingDetailDialog(
+      Map<String, dynamic> booking,
+      ) {
+    final vehicle =
+        booking['vehicles'] ?? {};
 
-    final progress = getServiceProgress(booking);
+    final services =
+    getServices(booking);
+
+    final isWalkIn =
+    isWalkInEntry(booking);
+
+    final status =
+        booking['status']?.toString() ??
+            'Booked';
+
+    final progress =
+    getServiceProgress(booking);
 
     final isAutoCancelled =
         !isWalkIn &&
-            getDisplayStatus(booking) == 'Cancelled' &&
+            getDisplayStatus(booking) ==
+                'Cancelled' &&
             isPastBooking(
-              booking['appointment_date'].toString(),
+              booking['appointment_date']
+                  .toString(),
             ) &&
             status != 'Cancelled' &&
             status != 'Rejected' &&
@@ -1516,19 +1751,35 @@ class _BookServicePageState extends State<BookServicePage>
         ? 'Completed'
         : isAutoCancelled
         ? 'Cancelled'
-        : bookingCategory == 'Arrived' &&
+        : bookingCategory ==
+        'Arrived' &&
         progress != null
         ? progress
         : status;
 
     final date = formatDate(
-      booking['appointment_date'].toString(),
+      booking['appointment_date']
+          .toString(),
     );
-    final problem = booking['problem_description'] ?? '';
-    final rejectionReason = booking['rejection_reason'] ?? '';
-    final total = getTotalPrice(booking);
 
-    final arrivedAt = getArrivedAt(booking);
+    final problem =
+        booking['problem_description']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final rejectionReason =
+        booking['rejection_reason']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final total =
+    getTotalPrice(booking);
+
+    final arrivedAt =
+    getArrivedAt(booking);
+
     final estimatedCompletionAt =
     getEstimatedCompletionAt(booking);
 
@@ -1549,404 +1800,2124 @@ class _BookServicePageState extends State<BookServicePage>
       fallback: 'Not Provided Yet',
     );
 
-    showDialog(
+    final plateNumber =
+        vehicle['plate_number']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final carModel =
+        vehicle['car_model']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final cancelEligible =
+        !isWalkIn &&
+            canModifyBooking(status) &&
+            canCancelBookingByDate(booking);
+
+    final daysUntilBooking =
+    getDaysUntilBooking(booking);
+
+    final statusColor =
+    getStatusColor(displayedStatus);
+
+    showDialog<void>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 35),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 22,
           ),
-          title: Text(
-            isWalkIn
-                ? 'Walk-in Service Details'
-                : 'Booking Details',
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 480,
+              maxHeight:
+              MediaQuery.of(dialogContext)
+                  .size
+                  .height *
+                  0.9,
             ),
-          ),
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color:
+                    Colors.black.withOpacity(
+                      0.18,
+                    ),
+                    blurRadius: 30,
+                    offset:
+                    const Offset(0, 12),
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize:
+                MainAxisSize.min,
                 children: [
-                  buildDetailBox('Plate Number', vehicle['plate_number'] ?? ''),
-                  buildDetailBox(
-                    'Car Model',
-                    vehicle['car_model'] ?? '',
-                  ),
-                  buildDetailBox(
-                    'Service Type',
-                    isWalkIn
-                        ? 'Walk-in'
-                        : 'Appointment',
-                  ),
-                  buildDetailBox(
-                    isWalkIn
-                        ? 'Walk-in Date'
-                        : 'Appointment Date',
-                    date,
-                  ),
-                  buildDetailBox(
-                    isWalkIn
-                        ? 'Service Status'
-                        : 'Booking Status',
-                    displayedStatus,
-                  ),
-                  if (showServiceTiming)
-                    buildDetailBox(
-                      'Arrived Time',
-                      arrivedTimeText,
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      18,
+                      17,
+                      10,
+                      17,
                     ),
-                  if (showServiceTiming)
-                    buildDetailBox(
-                      'Estimated Completion',
-                      estimatedCompletionText,
-                    ),
-                  if (status == 'Rejected' &&
-                      rejectionReason.toString().isNotEmpty)
-                    buildRejectReasonBox(rejectionReason.toString()),
-                  if (progress != null) buildProgressBox(progress),
-                  if (problem.toString().isNotEmpty)
-                    buildDetailBox('Notes', problem),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Service Items',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  ...services.map((service) {
-                    final price =
-                        double.tryParse(service['price'].toString()) ?? 0;
-
-                    final quantity =
-                        int.tryParse(
-                          service['quantity']
-                              ?.toString() ??
-                              '1',
-                        ) ??
-                            1;
-
-                    return buildServiceItem(
-                      service['service_name'] ?? '',
-                      price,
-                      quantity: quantity,
-                    );
-                  }),
-                  const Divider(height: 24),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      'Total: RM ${total.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                    decoration:
+                    const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Color(0xFF248CF2),
+                          Color(0xFF63B3FF),
+                        ],
                       ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration:
+                          BoxDecoration(
+                            color: Colors.white
+                                .withOpacity(0.18),
+                            borderRadius:
+                            BorderRadius.circular(
+                              17,
+                            ),
+                          ),
+                          child: Icon(
+                            isWalkIn
+                                ? Icons
+                                .car_repair_rounded
+                                : Icons
+                                .event_note_rounded,
+                            color: Colors.white,
+                            size: 29,
+                          ),
+                        ),
+                        const SizedBox(width: 13),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+                            children: [
+                              Text(
+                                isWalkIn
+                                    ? 'Walk-in Service Details'
+                                    : 'Booking Details',
+                                style:
+                                const TextStyle(
+                                  color:
+                                  Colors.white,
+                                  fontSize: 19,
+                                  fontWeight:
+                                  FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(
+                                height: 4,
+                              ),
+                              Text(
+                                '$plateNumber • $date',
+                                maxLines: 1,
+                                overflow:
+                                TextOverflow
+                                    .ellipsis,
+                                style:
+                                const TextStyle(
+                                  color:
+                                  Colors.white70,
+                                  fontSize: 11.5,
+                                  fontWeight:
+                                  FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () {
+                            Navigator.pop(
+                              dialogContext,
+                            );
+                          },
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child:
+                    SingleChildScrollView(
+                      padding:
+                      const EdgeInsets.all(
+                        17,
+                      ),
+                      child: Column(
+                        children: [
+                          buildBookingDetailSection(
+                            icon: Icons
+                                .directions_car_outlined,
+                            title:
+                            'Vehicle & Appointment',
+                            children: [
+                              buildBookingDetailRow(
+                                title:
+                                'Plate Number',
+                                value:
+                                plateNumber,
+                              ),
+                              buildBookingDetailRow(
+                                title: 'Car Model',
+                                value: carModel,
+                              ),
+                              buildBookingDetailRow(
+                                title:
+                                'Service Type',
+                                value: isWalkIn
+                                    ? 'Walk-in'
+                                    : 'Appointment',
+                              ),
+                              buildBookingDetailRow(
+                                title: isWalkIn
+                                    ? 'Walk-in Date'
+                                    : 'Appointment Date',
+                                value: date,
+                              ),
+                              Row(
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Current Status',
+                                      style:
+                                      TextStyle(
+                                        color:
+                                        Colors.black54,
+                                        fontSize: 12,
+                                        fontWeight:
+                                        FontWeight
+                                            .w600,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding:
+                                    const EdgeInsets
+                                        .symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration:
+                                    BoxDecoration(
+                                      color:
+                                      getStatusBackgroundColor(
+                                        displayedStatus,
+                                      ),
+                                      borderRadius:
+                                      BorderRadius
+                                          .circular(
+                                        20,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      displayedStatus,
+                                      style:
+                                      TextStyle(
+                                        color:
+                                        statusColor,
+                                        fontSize: 10.5,
+                                        fontWeight:
+                                        FontWeight
+                                            .bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          if (showServiceTiming) ...[
+                            const SizedBox(
+                              height: 13,
+                            ),
+                            buildBookingDetailSection(
+                              icon: Icons
+                                  .schedule_outlined,
+                              title:
+                              'Service Timing',
+                              children: [
+                                buildBookingDetailRow(
+                                  title:
+                                  'Arrived Time',
+                                  value:
+                                  arrivedTimeText,
+                                ),
+                                buildBookingDetailRow(
+                                  title:
+                                  'Estimated Completion',
+                                  value:
+                                  estimatedCompletionText,
+                                  showDivider:
+                                  false,
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (rejectionReason
+                              .isNotEmpty) ...[
+                            const SizedBox(
+                              height: 13,
+                            ),
+                            buildRejectReasonBox(
+                              rejectionReason,
+                            ),
+                          ],
+                          if (progress != null) ...[
+                            const SizedBox(
+                              height: 13,
+                            ),
+                            buildProgressBox(
+                              progress,
+                            ),
+                          ],
+                          if (problem.isNotEmpty) ...[
+                            const SizedBox(
+                              height: 13,
+                            ),
+                            buildBookingDetailSection(
+                              icon: Icons
+                                  .description_outlined,
+                              title:
+                              'Problem / Notes',
+                              children: [
+                                Text(
+                                  problem,
+                                  style:
+                                  const TextStyle(
+                                    color: Color(
+                                      0xFF374151,
+                                    ),
+                                    fontSize: 13,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          const SizedBox(
+                            height: 13,
+                          ),
+                          buildBookingDetailSection(
+                            icon:
+                            Icons.build_outlined,
+                            title:
+                            'Service Items',
+                            children: [
+                              if (services.isEmpty)
+                                buildServiceItem(
+                                  'No service found',
+                                  0,
+                                )
+                              else
+                                ...services.map(
+                                      (service) {
+                                    final price =
+                                        double.tryParse(
+                                          service[
+                                          'price']
+                                              .toString(),
+                                        ) ??
+                                            0;
+
+                                    final quantity =
+                                        int.tryParse(
+                                          service[
+                                          'quantity']
+                                              ?.toString() ??
+                                              '1',
+                                        ) ??
+                                            1;
+
+                                    return buildServiceItem(
+                                      service[
+                                      'service_name']
+                                          ?.toString() ??
+                                          '',
+                                      price,
+                                      quantity:
+                                      quantity,
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
+                          const SizedBox(
+                            height: 13,
+                          ),
+                          Container(
+                            width: double.infinity,
+                            padding:
+                            const EdgeInsets
+                                .all(
+                              16,
+                            ),
+                            decoration:
+                            BoxDecoration(
+                              color: const Color(
+                                0xFFEAF4FF,
+                              ),
+                              borderRadius:
+                              BorderRadius
+                                  .circular(
+                                18,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                    'Estimated Total',
+                                    style:
+                                    TextStyle(
+                                      color:
+                                      Colors.black54,
+                                      fontSize: 13,
+                                      fontWeight:
+                                      FontWeight
+                                          .w600,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  'RM ${total.toStringAsFixed(2)}',
+                                  style:
+                                  const TextStyle(
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                    fontSize: 20,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (!isWalkIn &&
+                              canModifyBooking(
+                                status,
+                              )) ...[
+                            const SizedBox(
+                              height: 13,
+                            ),
+                            Container(
+                              width: double.infinity,
+                              padding:
+                              const EdgeInsets
+                                  .all(
+                                13,
+                              ),
+                              decoration:
+                              BoxDecoration(
+                                color: cancelEligible
+                                    ? Colors
+                                    .green.shade50
+                                    : Colors
+                                    .orange.shade50,
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                  16,
+                                ),
+                              ),
+                              child: Row(
+                                crossAxisAlignment:
+                                CrossAxisAlignment
+                                    .start,
+                                children: [
+                                  Icon(
+                                    cancelEligible
+                                        ? Icons
+                                        .verified_outlined
+                                        : Icons
+                                        .warning_amber_rounded,
+                                    color: cancelEligible
+                                        ? Colors.green
+                                        : Colors.orange,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(
+                                    width: 9,
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      cancelEligible
+                                          ? 'This booking can still be cancelled because it is $daysUntilBooking day(s) away.'
+                                          : 'Cancellation is only available at least 3 days before the appointment.',
+                                      style:
+                                      const TextStyle(
+                                        color:
+                                        Color(
+                                          0xFF374151,
+                                        ),
+                                        fontSize: 11.5,
+                                        height: 1.4,
+                                        fontWeight:
+                                        FontWeight
+                                            .w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      16,
+                      12,
+                      16,
+                      16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        top: BorderSide(
+                          color:
+                          Colors.grey.shade200,
+                        ),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        if (!isWalkIn &&
+                            canModifyBooking(
+                              status,
+                            ))
+                          Row(
+                            children: [
+                              Expanded(
+                                child:
+                                OutlinedButton.icon(
+                                  style:
+                                  OutlinedButton
+                                      .styleFrom(
+                                    foregroundColor:
+                                    const Color(
+                                      0xFF339BFF,
+                                    ),
+                                    side:
+                                    const BorderSide(
+                                      color: Color(
+                                        0xFF339BFF,
+                                      ),
+                                    ),
+                                    padding:
+                                    const EdgeInsets
+                                        .symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape:
+                                    RoundedRectangleBorder(
+                                      borderRadius:
+                                      BorderRadius
+                                          .circular(
+                                        14,
+                                      ),
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    Navigator.pop(
+                                      dialogContext,
+                                    );
+                                    showEditBookingDialog(
+                                      booking,
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons
+                                        .edit_calendar_outlined,
+                                    size: 18,
+                                  ),
+                                  label:
+                                  const Text(
+                                    'Edit Booking',
+                                    style:
+                                    TextStyle(
+                                      fontWeight:
+                                      FontWeight
+                                          .bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(
+                                width: 9,
+                              ),
+                              Expanded(
+                                child:
+                                ElevatedButton.icon(
+                                  style:
+                                  ElevatedButton
+                                      .styleFrom(
+                                    backgroundColor:
+                                    Colors.red,
+                                    foregroundColor:
+                                    Colors.white,
+                                    padding:
+                                    const EdgeInsets
+                                        .symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape:
+                                    RoundedRectangleBorder(
+                                      borderRadius:
+                                      BorderRadius
+                                          .circular(
+                                        14,
+                                      ),
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    Navigator.pop(
+                                      dialogContext,
+                                    );
+
+                                    if (cancelEligible) {
+                                      showCancelConfirmDialog(
+                                        booking,
+                                      );
+                                    } else {
+                                      showMessage(
+                                        'Cancellation is only available at least 3 days before the appointment.',
+                                      );
+                                    }
+                                  },
+                                  icon: const Icon(
+                                    Icons
+                                        .event_busy_outlined,
+                                    size: 18,
+                                  ),
+                                  label:
+                                  const Text(
+                                    'Cancel',
+                                    style:
+                                    TextStyle(
+                                      fontWeight:
+                                      FontWeight
+                                          .bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        if (!isWalkIn &&
+                            canModifyBooking(
+                              status,
+                            ))
+                          const SizedBox(
+                            height: 10,
+                          ),
+                        SizedBox(
+                          width: double.infinity,
+                          child:
+                          OutlinedButton.icon(
+                            style:
+                            OutlinedButton
+                                .styleFrom(
+                              foregroundColor:
+                              const Color(
+                                0xFF1F2937,
+                              ),
+                              side: BorderSide(
+                                color: Colors
+                                    .grey.shade300,
+                              ),
+                              padding:
+                              const EdgeInsets
+                                  .symmetric(
+                                vertical: 12,
+                              ),
+                              shape:
+                              RoundedRectangleBorder(
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                  14,
+                                ),
+                              ),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(
+                                dialogContext,
+                              );
+                            },
+                            icon: const Icon(
+                              Icons.close_rounded,
+                            ),
+                            label: const Text(
+                              'Close',
+                              style: TextStyle(
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
           ),
-          actions: [
-            if (!isWalkIn && canModifyBooking(status))
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  showEditBookingDialog(booking);
-                },
-                child: const Text('Edit Booking'),
-              ),
-            if (!isWalkIn && canModifyBooking(status))
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  showCancelConfirmDialog(booking);
-                },
-                child: const Text(
-                  'Cancel Booking',
-                  style: TextStyle(color: Colors.red),
-                ),
-              ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
         );
       },
     );
   }
 
-  void showEditBookingDialog(Map<String, dynamic> booking) async {
-    final allServices = await fetchAllServices();
+  Widget buildBookingDetailSection({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius:
+        BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color:
+            Colors.black.withOpacity(0.035),
+            blurRadius: 8,
+            offset:
+            const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color:
+                  const Color(0xFFEAF4FF),
+                  borderRadius:
+                  BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  color:
+                  const Color(0xFF339BFF),
+                  size: 19,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color:
+                    Color(0xFF1F2937),
+                    fontSize: 15,
+                    fontWeight:
+                    FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 13),
+          ...children,
+        ],
+      ),
+    );
+  }
 
-    DateTime selectedDate = parseDate(booking['appointment_date']);
-    final notesController = TextEditingController(
-      text: booking['problem_description'] ?? '',
+  Widget buildBookingDetailRow({
+    required String title,
+    required String value,
+    bool showDivider = true,
+  }) {
+    final displayValue =
+    value.trim().isEmpty
+        ? 'Not Provided'
+        : value.trim();
+
+    return Column(
+      children: [
+        Row(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 4,
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12,
+                  fontWeight:
+                  FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 6,
+              child: Text(
+                displayValue,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  color:
+                  Color(0xFF1F2937),
+                  fontSize: 12,
+                  fontWeight:
+                  FontWeight.bold,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (showDivider) ...[
+          const SizedBox(height: 10),
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+
+  void showEditBookingDialog(
+      Map<String, dynamic> booking,
+      ) async {
+    final allServices =
+    await fetchAllServices();
+
+    DateTime selectedDate = parseDate(
+      booking['appointment_date'],
     );
 
-    List<Map<String, dynamic>> selectedServices =
+    final notesController =
+    TextEditingController(
+      text:
+      booking['problem_description'] ??
+          '',
+    );
+
+    List<Map<String, dynamic>>
+    selectedServices =
     List<Map<String, dynamic>>.from(
       getServices(booking),
     );
 
-    if (!mounted) return;
+    if (!mounted) {
+      notesController.dispose();
+      return;
+    }
 
-    showDialog(
+    showDialog<void>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (
+              dialogContext,
+              setDialogState,
+              ) {
             double editTotal = 0;
-            for (final service in selectedServices) {
-              editTotal += double.tryParse(service['price'].toString()) ?? 0;
+
+            for (final service
+            in selectedServices) {
+              editTotal +=
+                  double.tryParse(
+                    service['price']
+                        .toString(),
+                  ) ??
+                      0;
             }
 
-            bool isSelected(Map<String, dynamic> service) {
+            bool isSelected(
+                Map<String, dynamic> service,
+                ) {
               return selectedServices.any(
-                    (item) => item['service_id'] == service['service_id'],
+                    (item) =>
+                item['service_id'] ==
+                    service['service_id'],
               );
             }
 
-            void toggleService(Map<String, dynamic> service) {
+            void toggleService(
+                Map<String, dynamic> service,
+                ) {
               setDialogState(() {
                 if (isSelected(service)) {
                   selectedServices.removeWhere(
-                        (item) => item['service_id'] == service['service_id'],
+                        (item) =>
+                    item['service_id'] ==
+                        service['service_id'],
                   );
                 } else {
-                  selectedServices.add(service);
+                  selectedServices.add(
+                    service,
+                  );
                 }
               });
             }
 
-            return AlertDialog(
+            return Dialog(
+              backgroundColor:
+              Colors.transparent,
               insetPadding:
-              const EdgeInsets.symmetric(horizontal: 18, vertical: 28),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(22),
+              const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 22,
               ),
-              title: const Text(
-                'Edit Booking',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              content: SizedBox(
-                width: 430,
-                child: SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 480,
+                  maxHeight:
+                  MediaQuery.of(
+                    dialogContext,
+                  ).size.height *
+                      0.9,
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius:
+                    BorderRadius.circular(
+                      28,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black
+                            .withOpacity(0.18),
+                        blurRadius: 30,
+                        offset:
+                        const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  clipBehavior:
+                  Clip.antiAlias,
                   child: Column(
+                    mainAxisSize:
+                    MainAxisSize.min,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF5F7FA),
-                          borderRadius: BorderRadius.circular(16),
+                        width: double.infinity,
+                        padding:
+                        const EdgeInsets
+                            .fromLTRB(
+                          18,
+                          17,
+                          10,
+                          17,
+                        ),
+                        decoration:
+                        const BoxDecoration(
+                          gradient:
+                          LinearGradient(
+                            colors: [
+                              Color(
+                                0xFF248CF2,
+                              ),
+                              Color(
+                                0xFF63B3FF,
+                              ),
+                            ],
+                          ),
                         ),
                         child: Row(
                           children: [
-                            const Icon(
-                              Icons.event,
-                              color: Color(0xFF339BFF),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'Appointment Date: ${formatDate(toSqlDate(selectedDate))}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
+                            Container(
+                              width: 52,
+                              height: 52,
+                              decoration:
+                              BoxDecoration(
+                                color: Colors
+                                    .white
+                                    .withOpacity(
+                                  0.18,
+                                ),
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                  16,
                                 ),
                               ),
+                              child:
+                              const Icon(
+                                Icons
+                                    .edit_calendar_rounded,
+                                color:
+                                Colors.white,
+                                size: 28,
+                              ),
                             ),
-                            TextButton(
-                              onPressed: () async {
-                                final now = DateTime.now();
-
-                                final today = DateTime(
-                                  now.year,
-                                  now.month,
-                                  now.day,
+                            const SizedBox(
+                              width: 13,
+                            ),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment:
+                                CrossAxisAlignment
+                                    .start,
+                                children: [
+                                  Text(
+                                    'Edit Booking',
+                                    style:
+                                    TextStyle(
+                                      color:
+                                      Colors.white,
+                                      fontSize: 19,
+                                      fontWeight:
+                                      FontWeight
+                                          .bold,
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    height: 4,
+                                  ),
+                                  Text(
+                                    'Update the date, notes, or selected services',
+                                    style:
+                                    TextStyle(
+                                      color: Colors
+                                          .white70,
+                                      fontSize:
+                                      11.5,
+                                      fontWeight:
+                                      FontWeight
+                                          .w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Close',
+                              onPressed:
+                              isProcessingBooking
+                                  ? null
+                                  : () {
+                                Navigator.pop(
+                                  dialogContext,
                                 );
-
-                                final minimumDate = today.add(
-                                  const Duration(days: 1),
-                                );
-
-                                final maximumDate = DateTime(
-                                  now.year + 1,
-                                  now.month,
-                                  now.day,
-                                );
-
-                                DateTime initialPickerDate =
-                                    selectedDate;
-
-                                if (selectedDate.isBefore(minimumDate)) {
-                                  initialPickerDate = minimumDate;
-                                } else if (
-                                selectedDate.isAfter(maximumDate)
-                                ) {
-                                  initialPickerDate = maximumDate;
-                                }
-
-                                final picked = await showDatePicker(
-                                  context: context,
-                                  initialDate: initialPickerDate,
-                                  firstDate: minimumDate,
-                                  lastDate: maximumDate,
-                                );
-
-                                if (picked != null) {
-                                  setDialogState(() {
-                                    selectedDate = picked;
-                                  });
-                                }
                               },
-                              child: const Text('Change'),
+                              icon:
+                              const Icon(
+                                Icons
+                                    .close_rounded,
+                                color:
+                                Colors.white,
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: notesController,
-                        maxLines: 4,
-                        decoration: InputDecoration(
-                          labelText: 'Problem / Service Notes',
-                          hintText:
-                          'Describe any issue, noise, warning light, or special request.',
-                          filled: true,
-                          fillColor: const Color(0xFFF5F7FA),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none,
+                      Flexible(
+                        child:
+                        SingleChildScrollView(
+                          padding:
+                          const EdgeInsets
+                              .all(
+                            17,
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Select Services',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      ...allServices.map((service) {
-                        final selected = isSelected(service);
-                        final price =
-                            double.tryParse(service['price'].toString()) ?? 0;
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+                            children: [
+                              Container(
+                                width:
+                                double.infinity,
+                                padding:
+                                const EdgeInsets
+                                    .all(
+                                  14,
+                                ),
+                                decoration:
+                                BoxDecoration(
+                                  color:
+                                  const Color(
+                                    0xFFEAF4FF,
+                                  ),
+                                  borderRadius:
+                                  BorderRadius
+                                      .circular(
+                                    17,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons
+                                          .calendar_month_rounded,
+                                      color: Color(
+                                        0xFF339BFF,
+                                      ),
+                                    ),
+                                    const SizedBox(
+                                      width: 11,
+                                    ),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                        CrossAxisAlignment
+                                            .start,
+                                        children: [
+                                          const Text(
+                                            'Appointment Date',
+                                            style:
+                                            TextStyle(
+                                              color: Colors
+                                                  .black54,
+                                              fontSize:
+                                              11,
+                                              fontWeight:
+                                              FontWeight
+                                                  .w600,
+                                            ),
+                                          ),
+                                          const SizedBox(
+                                            height: 3,
+                                          ),
+                                          Text(
+                                            formatDate(
+                                              toSqlDate(
+                                                selectedDate,
+                                              ),
+                                            ),
+                                            style:
+                                            const TextStyle(
+                                              color: Color(
+                                                0xFF1F2937,
+                                              ),
+                                              fontSize:
+                                              14,
+                                              fontWeight:
+                                              FontWeight
+                                                  .bold,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    TextButton.icon(
+                                      onPressed:
+                                          () async {
+                                        final now =
+                                        DateTime.now();
 
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: selected
-                                  ? const Color(0xFF339BFF)
-                                  : Colors.grey.shade300,
+                                        final today =
+                                        DateTime(
+                                          now.year,
+                                          now.month,
+                                          now.day,
+                                        );
+
+                                        final minimumDate =
+                                        today.add(
+                                          const Duration(
+                                            days: 1,
+                                          ),
+                                        );
+
+                                        final maximumDate =
+                                        DateTime(
+                                          now.year +
+                                              1,
+                                          now.month,
+                                          now.day,
+                                        );
+
+                                        DateTime
+                                        initialPickerDate =
+                                            selectedDate;
+
+                                        if (selectedDate
+                                            .isBefore(
+                                          minimumDate,
+                                        )) {
+                                          initialPickerDate =
+                                              minimumDate;
+                                        } else if (selectedDate
+                                            .isAfter(
+                                          maximumDate,
+                                        )) {
+                                          initialPickerDate =
+                                              maximumDate;
+                                        }
+
+                                        final picked =
+                                        await showDatePicker(
+                                          context:
+                                          dialogContext,
+                                          initialDate:
+                                          initialPickerDate,
+                                          firstDate:
+                                          minimumDate,
+                                          lastDate:
+                                          maximumDate,
+                                        );
+
+                                        if (picked != null) {
+                                          setDialogState(
+                                                () {
+                                              selectedDate =
+                                                  picked;
+                                            },
+                                          );
+                                        }
+                                      },
+                                      icon:
+                                      const Icon(
+                                        Icons
+                                            .edit_outlined,
+                                        size: 17,
+                                      ),
+                                      label:
+                                      const Text(
+                                        'Change',
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(
+                                height: 14,
+                              ),
+                              TextField(
+                                controller:
+                                notesController,
+                                maxLines: 4,
+                                maxLength: 300,
+                                textCapitalization:
+                                TextCapitalization
+                                    .sentences,
+                                decoration:
+                                InputDecoration(
+                                  labelText:
+                                  'Problem / Service Notes',
+                                  hintText:
+                                  'Describe any issue, noise, warning light, or special request.',
+                                  prefixIcon:
+                                  const Padding(
+                                    padding:
+                                    EdgeInsets
+                                        .only(
+                                      bottom: 70,
+                                    ),
+                                    child: Icon(
+                                      Icons
+                                          .edit_note_rounded,
+                                      color: Color(
+                                        0xFF339BFF,
+                                      ),
+                                    ),
+                                  ),
+                                  filled: true,
+                                  fillColor:
+                                  const Color(
+                                    0xFFF7F9FC,
+                                  ),
+                                  border:
+                                  OutlineInputBorder(
+                                    borderRadius:
+                                    BorderRadius
+                                        .circular(
+                                      16,
+                                    ),
+                                    borderSide:
+                                    BorderSide
+                                        .none,
+                                  ),
+                                  focusedBorder:
+                                  OutlineInputBorder(
+                                    borderRadius:
+                                    BorderRadius
+                                        .circular(
+                                      16,
+                                    ),
+                                    borderSide:
+                                    const BorderSide(
+                                      color: Color(
+                                        0xFF339BFF,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(
+                                height: 8,
+                              ),
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons
+                                        .home_repair_service_outlined,
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                    size: 20,
+                                  ),
+                                  const SizedBox(
+                                    width: 8,
+                                  ),
+                                  const Expanded(
+                                    child: Text(
+                                      'Select Services',
+                                      style:
+                                      TextStyle(
+                                        color: Color(
+                                          0xFF1F2937,
+                                        ),
+                                        fontWeight:
+                                        FontWeight
+                                            .bold,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding:
+                                    const EdgeInsets
+                                        .symmetric(
+                                      horizontal: 9,
+                                      vertical: 5,
+                                    ),
+                                    decoration:
+                                    BoxDecoration(
+                                      color: const Color(
+                                        0xFFEAF4FF,
+                                      ),
+                                      borderRadius:
+                                      BorderRadius
+                                          .circular(
+                                        20,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      '${selectedServices.length} selected',
+                                      style:
+                                      const TextStyle(
+                                        color: Color(
+                                          0xFF339BFF,
+                                        ),
+                                        fontSize: 10,
+                                        fontWeight:
+                                        FontWeight
+                                            .bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(
+                                height: 10,
+                              ),
+                              ...allServices.map(
+                                    (service) {
+                                  final selected =
+                                  isSelected(
+                                    service,
+                                  );
+
+                                  final price =
+                                      double.tryParse(
+                                        service[
+                                        'price']
+                                            .toString(),
+                                      ) ??
+                                          0;
+
+                                  return
+                                    AnimatedContainer(
+                                      duration:
+                                      const Duration(
+                                        milliseconds:
+                                        180,
+                                      ),
+                                      margin:
+                                      const EdgeInsets
+                                          .only(
+                                        bottom: 9,
+                                      ),
+                                      decoration:
+                                      BoxDecoration(
+                                        color: selected
+                                            ? const Color(
+                                          0xFFF5FAFF,
+                                        )
+                                            : Colors
+                                            .white,
+                                        borderRadius:
+                                        BorderRadius
+                                            .circular(
+                                          16,
+                                        ),
+                                        border:
+                                        Border.all(
+                                          color: selected
+                                              ? const Color(
+                                            0xFF339BFF,
+                                          )
+                                              : Colors
+                                              .grey
+                                              .shade300,
+                                          width: selected
+                                              ? 1.5
+                                              : 1,
+                                        ),
+                                      ),
+                                      child: InkWell(
+                                        borderRadius:
+                                        BorderRadius
+                                            .circular(
+                                          16,
+                                        ),
+                                        onTap: () =>
+                                            toggleService(
+                                              service,
+                                            ),
+                                        child: Padding(
+                                          padding:
+                                          const EdgeInsets
+                                              .all(
+                                            13,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Container(
+                                                width:
+                                                38,
+                                                height:
+                                                38,
+                                                decoration:
+                                                BoxDecoration(
+                                                  color: selected
+                                                      ? const Color(
+                                                    0xFF339BFF,
+                                                  )
+                                                      : const Color(
+                                                    0xFFEAF4FF,
+                                                  ),
+                                                  borderRadius:
+                                                  BorderRadius.circular(
+                                                    12,
+                                                  ),
+                                                ),
+                                                child:
+                                                Icon(
+                                                  selected
+                                                      ? Icons.check_rounded
+                                                      : Icons.build_rounded,
+                                                  color: selected
+                                                      ? Colors.white
+                                                      : const Color(
+                                                    0xFF339BFF,
+                                                  ),
+                                                  size:
+                                                  20,
+                                                ),
+                                              ),
+                                              const SizedBox(
+                                                width:
+                                                11,
+                                              ),
+                                              Expanded(
+                                                child:
+                                                Text(
+                                                  service['service_name']
+                                                      ?.toString() ??
+                                                      '',
+                                                  style:
+                                                  const TextStyle(
+                                                    color:
+                                                    Color(
+                                                      0xFF1F2937,
+                                                    ),
+                                                    fontSize:
+                                                    12.5,
+                                                    fontWeight:
+                                                    FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+                                              Text(
+                                                'RM ${price.toStringAsFixed(2)}',
+                                                style:
+                                                const TextStyle(
+                                                  color:
+                                                  Color(
+                                                    0xFF339BFF,
+                                                  ),
+                                                  fontSize:
+                                                  12,
+                                                  fontWeight:
+                                                  FontWeight.bold,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                },
+                              ),
+                              const SizedBox(
+                                height: 5,
+                              ),
+                              Container(
+                                width:
+                                double.infinity,
+                                padding:
+                                const EdgeInsets
+                                    .all(
+                                  15,
+                                ),
+                                decoration:
+                                BoxDecoration(
+                                  color:
+                                  const Color(
+                                    0xFFEAF4FF,
+                                  ),
+                                  borderRadius:
+                                  BorderRadius
+                                      .circular(
+                                    17,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Expanded(
+                                      child: Text(
+                                        'Estimated Total',
+                                        style:
+                                        TextStyle(
+                                          color: Colors
+                                              .black54,
+                                          fontSize:
+                                          12.5,
+                                          fontWeight:
+                                          FontWeight
+                                              .w600,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      'RM ${editTotal.toStringAsFixed(2)}',
+                                      style:
+                                      const TextStyle(
+                                        color: Color(
+                                          0xFF339BFF,
+                                        ),
+                                        fontSize: 19,
+                                        fontWeight:
+                                        FontWeight
+                                            .bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Container(
+                        width: double.infinity,
+                        padding:
+                        const EdgeInsets
+                            .fromLTRB(
+                          16,
+                          12,
+                          16,
+                          16,
+                        ),
+                        decoration:
+                        BoxDecoration(
+                          color: Colors.white,
+                          border: Border(
+                            top: BorderSide(
+                              color: Colors
+                                  .grey.shade200,
                             ),
                           ),
-                          child: CheckboxListTile(
-                            activeColor: const Color(0xFF339BFF),
-                            value: selected,
-                            onChanged: (_) => toggleService(service),
-                            title: Text(
-                              service['service_name'] ?? '',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child:
+                              OutlinedButton(
+                                style:
+                                OutlinedButton
+                                    .styleFrom(
+                                  foregroundColor:
+                                  const Color(
+                                    0xFF1F2937,
+                                  ),
+                                  side: BorderSide(
+                                    color: Colors
+                                        .grey
+                                        .shade300,
+                                  ),
+                                  padding:
+                                  const EdgeInsets
+                                      .symmetric(
+                                    vertical: 13,
+                                  ),
+                                  shape:
+                                  RoundedRectangleBorder(
+                                    borderRadius:
+                                    BorderRadius
+                                        .circular(
+                                      14,
+                                    ),
+                                  ),
+                                ),
+                                onPressed:
+                                isProcessingBooking
+                                    ? null
+                                    : () {
+                                  Navigator.pop(
+                                    dialogContext,
+                                  );
+                                },
+                                child:
+                                const Text(
+                                  'Cancel',
+                                  style:
+                                  TextStyle(
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                  ),
+                                ),
                               ),
                             ),
-                            subtitle: Text(
-                              'RM ${price.toStringAsFixed(2)}',
+                            const SizedBox(
+                              width: 10,
                             ),
-                          ),
-                        );
-                      }),
-                      const Divider(height: 24),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          'Estimated Total: RM ${editTotal.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
+                            Expanded(
+                              child:
+                              ElevatedButton.icon(
+                                style:
+                                ElevatedButton
+                                    .styleFrom(
+                                  backgroundColor:
+                                  const Color(
+                                    0xFF339BFF,
+                                  ),
+                                  foregroundColor:
+                                  Colors.white,
+                                  padding:
+                                  const EdgeInsets
+                                      .symmetric(
+                                    vertical: 13,
+                                  ),
+                                  shape:
+                                  RoundedRectangleBorder(
+                                    borderRadius:
+                                    BorderRadius
+                                        .circular(
+                                      14,
+                                    ),
+                                  ),
+                                ),
+                                onPressed:
+                                isProcessingBooking
+                                    ? null
+                                    : () async {
+                                  if (selectedServices
+                                      .isEmpty) {
+                                    showMessage(
+                                      'Please select at least one service.',
+                                    );
+                                    return;
+                                  }
+
+                                  Navigator.pop(
+                                    dialogContext,
+                                  );
+
+                                  await updateBooking(
+                                    booking:
+                                    booking,
+                                    newDate:
+                                    selectedDate,
+                                    problem:
+                                    notesController.text,
+                                    selectedServices:
+                                    selectedServices,
+                                  );
+                                },
+                                icon:
+                                const Icon(
+                                  Icons
+                                      .save_outlined,
+                                  size: 18,
+                                ),
+                                label:
+                                const Text(
+                                  'Save Changes',
+                                  style:
+                                  TextStyle(
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (selectedServices.isEmpty) {
-                      showMessage('Please select at least one service.');
-                      return;
-                    }
-
-                    Navigator.pop(context);
-
-                    await updateBooking(
-                      booking: booking,
-                      newDate: selectedDate,
-                      problem: notesController.text,
-                      selectedServices: selectedServices,
-                    );
-                  },
-                  child: const Text('Save Changes'),
-                ),
-              ],
             );
           },
+        );
+      },
+    ).whenComplete(
+      notesController.dispose,
+    );
+  }
+
+  void showCancelConfirmDialog(
+      Map<String, dynamic> booking,
+      ) {
+    final vehicle =
+        booking['vehicles'] ?? {};
+
+    final plateNumber =
+        vehicle['plate_number']
+            ?.toString()
+            .trim() ??
+            'Not Provided';
+
+    final carModel =
+        vehicle['car_model']
+            ?.toString()
+            .trim() ??
+            'Not Provided';
+
+    final appointmentDate = formatDate(
+      booking['appointment_date']
+          .toString(),
+    );
+
+    final daysUntil =
+    getDaysUntilBooking(booking);
+
+    final eligible =
+    canCancelBookingByDate(booking);
+
+    if (!eligible) {
+      showMessage(
+        'Cancellation is only available at least 3 days before the appointment.',
+      );
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor:
+          Colors.transparent,
+          insetPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 22,
+            vertical: 28,
+          ),
+          child: Container(
+            constraints:
+            const BoxConstraints(
+              maxWidth: 440,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius:
+              BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color:
+                  Colors.black.withOpacity(
+                    0.16,
+                  ),
+                  blurRadius: 28,
+                  offset:
+                  const Offset(0, 12),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize:
+              MainAxisSize.min,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding:
+                  const EdgeInsets.all(
+                    20,
+                  ),
+                  color: Colors.red,
+                  child: const Column(
+                    children: [
+                      CircleAvatar(
+                        radius: 31,
+                        backgroundColor:
+                        Colors.white24,
+                        child: Icon(
+                          Icons
+                              .event_busy_rounded,
+                          color: Colors.white,
+                          size: 34,
+                        ),
+                      ),
+                      SizedBox(height: 12),
+                      Text(
+                        'Cancel Booking?',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight:
+                          FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 5),
+                      Text(
+                        'This action will update the booking status immediately.',
+                        textAlign:
+                        TextAlign.center,
+                        style: TextStyle(
+                          color:
+                          Colors.white70,
+                          fontSize: 11.5,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding:
+                  const EdgeInsets.all(
+                    18,
+                  ),
+                  child: Column(
+                    children: [
+                      buildCancellationInfoRow(
+                        icon: Icons
+                            .directions_car_outlined,
+                        title: 'Vehicle',
+                        value:
+                        '$plateNumber • $carModel',
+                      ),
+                      const SizedBox(
+                        height: 10,
+                      ),
+                      buildCancellationInfoRow(
+                        icon: Icons
+                            .calendar_month_outlined,
+                        title:
+                        'Appointment Date',
+                        value:
+                        appointmentDate,
+                      ),
+                      const SizedBox(
+                        height: 10,
+                      ),
+                      buildCancellationInfoRow(
+                        icon: Icons
+                            .schedule_outlined,
+                        title:
+                        'Days Remaining',
+                        value:
+                        '$daysUntil day(s)',
+                      ),
+                      const SizedBox(
+                        height: 14,
+                      ),
+                      Container(
+                        width:
+                        double.infinity,
+                        padding:
+                        const EdgeInsets
+                            .all(
+                          13,
+                        ),
+                        decoration:
+                        BoxDecoration(
+                          color:
+                          Colors.orange.shade50,
+                          borderRadius:
+                          BorderRadius
+                              .circular(
+                            16,
+                          ),
+                        ),
+                        child: const Row(
+                          crossAxisAlignment:
+                          CrossAxisAlignment
+                              .start,
+                          children: [
+                            Icon(
+                              Icons
+                                  .info_outline_rounded,
+                              color:
+                              Colors.orange,
+                              size: 20,
+                            ),
+                            SizedBox(
+                              width: 9,
+                            ),
+                            Expanded(
+                              child: Text(
+                                'Cancelled bookings cannot be restored from the app. A new booking must be created if needed.',
+                                style:
+                                TextStyle(
+                                  color:
+                                  Color(
+                                    0xFF374151,
+                                  ),
+                                  fontSize:
+                                  11.5,
+                                  height:
+                                  1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: double.infinity,
+                  padding:
+                  const EdgeInsets
+                      .fromLTRB(
+                    16,
+                    12,
+                    16,
+                    16,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      top: BorderSide(
+                        color: Colors
+                            .grey.shade200,
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child:
+                        OutlinedButton(
+                          style:
+                          OutlinedButton
+                              .styleFrom(
+                            foregroundColor:
+                            const Color(
+                              0xFF1F2937,
+                            ),
+                            side: BorderSide(
+                              color: Colors
+                                  .grey.shade300,
+                            ),
+                            padding:
+                            const EdgeInsets
+                                .symmetric(
+                              vertical: 13,
+                            ),
+                            shape:
+                            RoundedRectangleBorder(
+                              borderRadius:
+                              BorderRadius
+                                  .circular(
+                                14,
+                              ),
+                            ),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(
+                              dialogContext,
+                            );
+                          },
+                          child:
+                          const Text(
+                            'Keep Booking',
+                            style:
+                            TextStyle(
+                              fontWeight:
+                              FontWeight
+                                  .bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(
+                        width: 10,
+                      ),
+                      Expanded(
+                        child:
+                        ElevatedButton.icon(
+                          style:
+                          ElevatedButton
+                              .styleFrom(
+                            backgroundColor:
+                            Colors.red,
+                            foregroundColor:
+                            Colors.white,
+                            padding:
+                            const EdgeInsets
+                                .symmetric(
+                              vertical: 13,
+                            ),
+                            shape:
+                            RoundedRectangleBorder(
+                              borderRadius:
+                              BorderRadius
+                                  .circular(
+                                14,
+                              ),
+                            ),
+                          ),
+                          onPressed: () async {
+                            Navigator.pop(
+                              dialogContext,
+                            );
+                            await cancelBooking(
+                              booking,
+                            );
+                          },
+                          icon: const Icon(
+                            Icons
+                                .event_busy_outlined,
+                            size: 18,
+                          ),
+                          label:
+                          const Text(
+                            'Cancel Booking',
+                            style:
+                            TextStyle(
+                              fontWeight:
+                              FontWeight
+                                  .bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
   }
 
-  void showCancelConfirmDialog(Map<String, dynamic> booking) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Cancel Booking'),
-          content: const Text(
-            'Are you sure you want to cancel this booking?',
+  Widget buildCancellationInfoRow({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color:
+        const Color(0xFFF7F9FC),
+        borderRadius:
+        BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            color:
+            const Color(0xFF339BFF),
+            size: 19,
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('No'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.black54,
+                fontSize: 11.5,
+                fontWeight:
+                FontWeight.w600,
               ),
-              onPressed: () async {
-                Navigator.pop(context);
-                await cancelBooking(booking);
-              },
-              child: const Text('Yes, Cancel'),
             ),
-          ],
-        );
-      },
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 2,
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color:
+                Color(0xFF1F2937),
+                fontSize: 11.5,
+                fontWeight:
+                FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2307,37 +4278,76 @@ class _BookServicePageState extends State<BookServicePage>
   }) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding:
+        const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95),
-          borderRadius: BorderRadius.circular(18),
+          color:
+          Colors.white.withOpacity(
+            0.97,
+          ),
+          borderRadius:
+          BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color:
+              Colors.black.withOpacity(
+                0.05,
+              ),
+              blurRadius: 9,
+              offset:
+              const Offset(0, 4),
+            ),
+          ],
         ),
         child: Row(
           children: [
-            CircleAvatar(
-              backgroundColor: const Color(0xFFD7E5FA),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color:
+                const Color(0xFFEAF4FF),
+                borderRadius:
+                BorderRadius.circular(
+                  13,
+                ),
+              ),
               child: Icon(
                 icon,
-                color: const Color(0xFF339BFF),
+                color:
+                const Color(0xFF339BFF),
+                size: 22,
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 children: [
                   Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 12,
+                    value,
+                    style:
+                    const TextStyle(
+                      color:
+                      Color(0xFF1F2937),
+                      fontSize: 21,
+                      fontWeight:
+                      FontWeight.bold,
                     ),
                   ),
                   Text(
-                    value,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
+                    title,
+                    maxLines: 1,
+                    overflow:
+                    TextOverflow.ellipsis,
+                    style:
+                    const TextStyle(
+                      color:
+                      Colors.black54,
+                      fontSize: 11.5,
+                      fontWeight:
+                      FontWeight.w600,
                     ),
                   ),
                 ],
@@ -2415,6 +4425,9 @@ class _BookServicePageState extends State<BookServicePage>
       getEstimatedCompletionAt(booking),
       fallback: 'Not Provided Yet',
     );
+
+    final total =
+    getTotalPrice(booking);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -2619,6 +4632,51 @@ class _BookServicePageState extends State<BookServicePage>
                   ),
                 ),
               ],
+              const SizedBox(height: 14),
+              Divider(
+                height: 1,
+                color: Colors.grey.shade200,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Icon(
+                    Icons
+                        .touch_app_outlined,
+                    color:
+                    Color(0xFF339BFF),
+                    size: 17,
+                  ),
+                  const SizedBox(width: 7),
+                  const Expanded(
+                    child: Text(
+                      'Tap to view details',
+                      style: TextStyle(
+                        color: Colors.black45,
+                        fontSize: 11.5,
+                        fontWeight:
+                        FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'RM ${total.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      color:
+                      Color(0xFF339BFF),
+                      fontSize: 14,
+                      fontWeight:
+                      FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.black38,
+                    size: 20,
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -2774,19 +4832,133 @@ class _BookServicePageState extends State<BookServicePage>
             ),
             if (displayBookings.isEmpty)
               SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 35,
+                child: Container(
+                  margin:
+                  const EdgeInsets.fromLTRB(
+                    16,
+                    12,
+                    16,
+                    28,
                   ),
-                  child: Center(
-                    child: Text(
-                      'No $selectedFilter services.',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: Colors.black54,
-                      ),
+                  padding:
+                  const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 34,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius:
+                    BorderRadius.circular(
+                      22,
                     ),
+                    border: Border.all(
+                      color:
+                      const Color(
+                        0xFF339BFF,
+                      ).withOpacity(0.10),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 70,
+                        height: 70,
+                        decoration:
+                        BoxDecoration(
+                          color: const Color(
+                            0xFFEAF4FF,
+                          ),
+                          borderRadius:
+                          BorderRadius
+                              .circular(
+                            23,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons
+                              .car_repair_outlined,
+                          color: Color(
+                            0xFF339BFF,
+                          ),
+                          size: 35,
+                        ),
+                      ),
+                      const SizedBox(
+                        height: 16,
+                      ),
+                      Text(
+                        'No $selectedFilter Services',
+                        textAlign:
+                        TextAlign.center,
+                        style:
+                        const TextStyle(
+                          color:
+                          Color(0xFF1F2937),
+                          fontSize: 18,
+                          fontWeight:
+                          FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(
+                        height: 7,
+                      ),
+                      Text(
+                        selectedFilter ==
+                            'Upcoming'
+                            ? 'Create a new appointment to start your next service booking.'
+                            : 'Your service updates will appear here when available.',
+                        textAlign:
+                        TextAlign.center,
+                        style:
+                        const TextStyle(
+                          color:
+                          Colors.black54,
+                          fontSize: 12.5,
+                          height: 1.4,
+                        ),
+                      ),
+                      if (selectedFilter ==
+                          'Upcoming') ...[
+                        const SizedBox(
+                          height: 17,
+                        ),
+                        ElevatedButton.icon(
+                          style:
+                          ElevatedButton
+                              .styleFrom(
+                            backgroundColor:
+                            const Color(
+                              0xFF339BFF,
+                            ),
+                            foregroundColor:
+                            Colors.white,
+                            shape:
+                            RoundedRectangleBorder(
+                              borderRadius:
+                              BorderRadius
+                                  .circular(
+                                14,
+                              ),
+                            ),
+                          ),
+                          onPressed:
+                          goToCalendarPage,
+                          icon: const Icon(
+                            Icons.add_rounded,
+                          ),
+                          label:
+                          const Text(
+                            'Create Booking',
+                            style:
+                            TextStyle(
+                              fontWeight:
+                              FontWeight
+                                  .bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               )

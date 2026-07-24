@@ -35,6 +35,7 @@ class _NavigationControlState extends State<NavigationControl> {
     'name': 'Customer',
     'email': '',
     'phone': '',
+    'profile_image_url': '',
   };
 
   @override
@@ -64,7 +65,7 @@ class _NavigationControlState extends State<NavigationControl> {
 
       final response = await supabase
           .from('customers')
-          .select('name, email, phone')
+          .select('name, email, phone, profile_image_url')
           .eq('auth_user_id', user.id)
           .maybeSingle();
 
@@ -74,6 +75,9 @@ class _NavigationControlState extends State<NavigationControl> {
             'name': (response['name'] ?? 'Customer').toString(),
             'email': (response['email'] ?? user.email ?? '').toString(),
             'phone': (response['phone'] ?? '').toString(),
+            'profile_image_url':
+            (response['profile_image_url'] ?? '')
+                .toString(),
           };
         });
       }
@@ -205,6 +209,196 @@ class _NavigationControlState extends State<NavigationControl> {
     );
   }
 
+  String get customerProfileImageUrl {
+    return customerProfile['profile_image_url']
+        ?.trim() ??
+        '';
+  }
+
+  Widget buildCustomerProfileImage({
+    required double size,
+  }) {
+    if (customerProfileImageUrl.isEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        color: const Color(0xFFD7E5FA),
+        child: Icon(
+          Icons.person,
+          size: size * 0.58,
+          color: const Color(0xFF339BFF),
+        ),
+      );
+    }
+
+    return Image.network(
+      customerProfileImageUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (
+          context,
+          error,
+          stackTrace,
+          ) {
+        return Container(
+          width: size,
+          height: size,
+          color: const Color(0xFFD7E5FA),
+          child: Icon(
+            Icons.person,
+            size: size * 0.58,
+            color: const Color(0xFF339BFF),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget buildCustomerAvatar({
+    required double size,
+    double borderWidth = 3,
+  }) {
+    return Container(
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(borderWidth),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipOval(
+        child: buildCustomerProfileImage(
+          size: size - (borderWidth * 2),
+        ),
+      ),
+    );
+  }
+
+  void showCustomerProfilePicturePreview() {
+    if (customerProfileImageUrl.isEmpty) {
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) {
+        final screenSize =
+            MediaQuery.of(dialogContext).size;
+
+        final previewSize =
+        screenSize.width < 520
+            ? screenSize.width - 34
+            : 470.0;
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(17),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: previewSize,
+                height: previewSize,
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius:
+                  BorderRadius.circular(26),
+                  boxShadow: [
+                    BoxShadow(
+                      color:
+                      Colors.black.withOpacity(0.36),
+                      blurRadius: 28,
+                      offset:
+                      const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: Image.network(
+                    customerProfileImageUrl,
+                    width: previewSize,
+                    height: previewSize,
+                    fit: BoxFit.contain,
+                    errorBuilder: (
+                        context,
+                        error,
+                        stackTrace,
+                        ) {
+                      return const Center(
+                        child: Icon(
+                          Icons.broken_image_outlined,
+                          color: Colors.white54,
+                          size: 70,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Material(
+                  color: Colors.black54,
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    tooltip: 'Close',
+                    onPressed: () {
+                      Navigator.pop(
+                        dialogContext,
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 18,
+                right: 18,
+                bottom: 18,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius:
+                    BorderRadius.circular(14),
+                  ),
+                  child: const Text(
+                    'Pinch to zoom the profile picture',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void showCustomerMenu() {
     showGeneralDialog(
       context: context,
@@ -246,15 +440,25 @@ class _NavigationControlState extends State<NavigationControl> {
                       ),
                       child: Column(
                         children: [
-                          const CircleAvatar(
-                            radius: 42,
-                            backgroundColor: Color(0xFF339BFF),
-                            child: Icon(
-                              Icons.person,
-                              size: 48,
-                              color: Colors.white,
+                          GestureDetector(
+                            onTap: customerProfileImageUrl.isEmpty
+                                ? null
+                                : showCustomerProfilePicturePreview,
+                            child: buildCustomerAvatar(
+                              size: 92,
+                              borderWidth: 4,
                             ),
                           ),
+                          if (customerProfileImageUrl.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Tap picture to view',
+                              style: TextStyle(
+                                color: Colors.black45,
+                                fontSize: 10.5,
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 14),
                           Text(
                             isLoadingProfile
@@ -326,7 +530,10 @@ class _NavigationControlState extends State<NavigationControl> {
                               customerProfile: customerProfile,
                               onProfileUpdated: (updatedProfile) {
                                 setState(() {
-                                  customerProfile = updatedProfile;
+                                  customerProfile = {
+                                    ...customerProfile,
+                                    ...updatedProfile,
+                                  };
                                 });
                               },
                             ),
@@ -457,6 +664,12 @@ class _NavigationControlState extends State<NavigationControl> {
 
   @override
   Widget build(BuildContext context) {
+    const profileButtonSize = 42.0;
+
+    final profileButtonTop =
+        MediaQuery.of(context).padding.top +
+            ((kToolbarHeight - profileButtonSize) / 2);
+
     final pages = [
       CustomerDashboardContent(onNavigate: changePage),
       const MyVehiclesPage(),
@@ -470,21 +683,24 @@ class _NavigationControlState extends State<NavigationControl> {
         children: [
           pages[currentIndex],
           Positioned(
-            left: 16,
-            top: 28,
+            left: 12,
+            top: profileButtonTop,
             child: SizedBox(
-              width: 42,
-              height: 42,
+              width: profileButtonSize,
+              height: profileButtonSize,
               child: FloatingActionButton(
                 heroTag: 'customerProfileButton',
                 elevation: 4,
                 backgroundColor: Colors.white,
                 shape: const CircleBorder(),
                 onPressed: showCustomerMenu,
-                child: const Icon(
-                  Icons.person,
-                  size: 24,
-                  color: Color(0xFF339BFF),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: ClipOval(
+                    child: buildCustomerProfileImage(
+                      size: 38,
+                    ),
+                  ),
                 ),
               ),
             ),

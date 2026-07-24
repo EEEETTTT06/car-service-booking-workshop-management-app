@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/supabase_service.dart';
 import '../common/app_result_message.dart';
+import '../common/notification_navigation_service.dart';
 
 class CustomerNotificationPage extends StatefulWidget {
   const CustomerNotificationPage({super.key});
@@ -639,23 +640,511 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
     );
   }
 
-  Widget buildNotificationCard(Map<String, dynamic> item) {
-    final title = item['title']?.toString() ?? 'Notification';
-    final message = item['message']?.toString() ?? '';
-    final type = item['notification_type']?.toString();
-    final isRead = item['is_read'] == true;
-    final color = getNotificationColor(type, title);
+  String getNotificationTypeLabel(
+      Map<String, dynamic> item,
+      ) {
+    final type = item['notification_type']
+        ?.toString()
+        .trim();
+
+    if (type == null || type.isEmpty) {
+      return 'General Notification';
+    }
+
+    return type
+        .replaceAll('_', ' ')
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map(
+          (part) =>
+      '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+    )
+        .join(' ');
+  }
+
+  Future<void> openNotificationDetails(
+      Map<String, dynamic> item,
+      ) async {
+    await markAsRead(item);
+
+    if (!mounted) return;
+
+    final title =
+        item['title']?.toString().trim() ??
+            'Notification';
+
+    final message =
+        item['message']?.toString().trim() ??
+            '';
+
+    final type =
+    item['notification_type']?.toString();
+
+    final color =
+    getNotificationColor(type, title);
+
+    final canOpenRelatedPage =
+    NotificationNavigationService.canOpen(
+      notification: item,
+      isAdmin: false,
+    );
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 470,
+              maxHeight:
+              MediaQuery.of(dialogContext)
+                  .size
+                  .height *
+                  0.86,
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color:
+                    Colors.black.withOpacity(0.16),
+                    blurRadius: 28,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      18,
+                      16,
+                      10,
+                      16,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          color,
+                          color.withOpacity(0.72),
+                        ],
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color:
+                            Colors.white.withOpacity(
+                              0.18,
+                            ),
+                            borderRadius:
+                            BorderRadius.circular(
+                              16,
+                            ),
+                          ),
+                          child: Icon(
+                            getNotificationIcon(
+                              type,
+                              title,
+                            ),
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                        ),
+                        const SizedBox(width: 13),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+                            children: [
+                              Text(
+                                title.isEmpty
+                                    ? 'Notification'
+                                    : title,
+                                maxLines: 2,
+                                overflow:
+                                TextOverflow.ellipsis,
+                                style:
+                                const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight:
+                                  FontWeight.bold,
+                                  height: 1.25,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                getNotificationTypeLabel(
+                                  item,
+                                ),
+                                maxLines: 1,
+                                overflow:
+                                TextOverflow.ellipsis,
+                                style:
+                                const TextStyle(
+                                  color:
+                                  Colors.white70,
+                                  fontSize: 11.5,
+                                  fontWeight:
+                                  FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () {
+                            Navigator.pop(
+                              dialogContext,
+                            );
+                          },
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding:
+                      const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: double.infinity,
+                            padding:
+                            const EdgeInsets.all(
+                              15,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                              const Color(0xFFF7F9FC),
+                              borderRadius:
+                              BorderRadius.circular(
+                                18,
+                              ),
+                              border: Border.all(
+                                color:
+                                Colors.grey.shade200,
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                              children: [
+                                const Row(
+                                  children: [
+                                    Icon(
+                                      Icons
+                                          .subject_rounded,
+                                      color:
+                                      Color(0xFF339BFF),
+                                      size: 20,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Notification Details',
+                                      style: TextStyle(
+                                        color:
+                                        Color(0xFF1F2937),
+                                        fontSize: 15,
+                                        fontWeight:
+                                        FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 13),
+                                Text(
+                                  message.isEmpty
+                                      ? 'No additional information was provided.'
+                                      : message,
+                                  style: const TextStyle(
+                                    color:
+                                    Color(0xFF374151),
+                                    fontSize: 13.5,
+                                    height: 1.55,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Container(
+                            width: double.infinity,
+                            padding:
+                            const EdgeInsets.all(
+                              14,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                              const Color(0xFFEAF4FF),
+                              borderRadius:
+                              BorderRadius.circular(
+                                16,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons
+                                      .schedule_rounded,
+                                  color:
+                                  Color(0xFF339BFF),
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    formatDate(
+                                      item[
+                                      'created_at'],
+                                    ),
+                                    style:
+                                    const TextStyle(
+                                      color:
+                                      Color(0xFF1F2937),
+                                      fontSize: 12.5,
+                                      fontWeight:
+                                      FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding:
+                                  const EdgeInsets
+                                      .symmetric(
+                                    horizontal: 9,
+                                    vertical: 5,
+                                  ),
+                                  decoration:
+                                  BoxDecoration(
+                                    color:
+                                    Colors.green.shade50,
+                                    borderRadius:
+                                    BorderRadius.circular(
+                                      20,
+                                    ),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize:
+                                    MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons
+                                            .check_circle_outline,
+                                        color:
+                                        Colors.green,
+                                        size: 14,
+                                      ),
+                                      SizedBox(width: 5),
+                                      Text(
+                                        'READ',
+                                        style:
+                                        TextStyle(
+                                          color:
+                                          Colors.green,
+                                          fontSize: 10,
+                                          fontWeight:
+                                          FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      16,
+                      12,
+                      16,
+                      16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        top: BorderSide(
+                          color:
+                          Colors.grey.shade200,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style:
+                            OutlinedButton.styleFrom(
+                              foregroundColor:
+                              const Color(
+                                0xFF1F2937,
+                              ),
+                              side: BorderSide(
+                                color:
+                                Colors.grey.shade300,
+                              ),
+                              padding:
+                              const EdgeInsets.symmetric(
+                                vertical: 13,
+                              ),
+                              shape:
+                              RoundedRectangleBorder(
+                                borderRadius:
+                                BorderRadius.circular(
+                                  14,
+                                ),
+                              ),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(
+                                dialogContext,
+                              );
+                            },
+                            child: const Text(
+                              'Close',
+                              style: TextStyle(
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (canOpenRelatedPage) ...[
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child:
+                            ElevatedButton.icon(
+                              style: ElevatedButton
+                                  .styleFrom(
+                                backgroundColor:
+                                const Color(
+                                  0xFF339BFF,
+                                ),
+                                foregroundColor:
+                                Colors.white,
+                                padding:
+                                const EdgeInsets
+                                    .symmetric(
+                                  vertical: 13,
+                                ),
+                                shape:
+                                RoundedRectangleBorder(
+                                  borderRadius:
+                                  BorderRadius
+                                      .circular(
+                                    14,
+                                  ),
+                                ),
+                              ),
+                              onPressed: () async {
+                                Navigator.pop(
+                                  dialogContext,
+                                );
+
+                                await NotificationNavigationService
+                                    .openRelatedPage(
+                                  context,
+                                  notification: item,
+                                  isAdmin: false,
+                                );
+
+                                if (mounted) {
+                                  await loadNotifications();
+                                }
+                              },
+                              icon: const Icon(
+                                Icons
+                                    .open_in_new_rounded,
+                                size: 18,
+                              ),
+                              label: const Text(
+                                'Open Related Page',
+                                style: TextStyle(
+                                  fontWeight:
+                                  FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (mounted) {
+      await loadNotifications();
+    }
+  }
+
+  Widget buildNotificationCard(
+      Map<String, dynamic> item,
+      ) {
+    final title =
+        item['title']?.toString().trim() ??
+            'Notification';
+
+    final type =
+    item['notification_type']?.toString();
+
+    final isRead =
+        item['is_read'] == true;
+
+    final color =
+    getNotificationColor(type, title);
 
     return Dismissible(
-      key: ValueKey(item['notification_id'].toString()),
-      direction: DismissDirection.endToStart,
+      key: ValueKey(
+        item['notification_id'].toString(),
+      ),
+      direction:
+      DismissDirection.endToStart,
       background: Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.only(right: 20),
+        margin:
+        const EdgeInsets.only(bottom: 14),
+        padding:
+        const EdgeInsets.only(right: 20),
         alignment: Alignment.centerRight,
         decoration: BoxDecoration(
           color: Colors.red,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius:
+          BorderRadius.circular(20),
         ),
         child: const Icon(
           Icons.delete,
@@ -664,7 +1153,9 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
       ),
       confirmDismiss: (_) async {
         final confirmed =
-        await showDeleteConfirmation(item);
+        await showDeleteConfirmation(
+          item,
+        );
 
         if (!confirmed) return false;
 
@@ -672,87 +1163,176 @@ class _CustomerNotificationPageState extends State<CustomerNotificationPage> {
         return false;
       },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 14),
+        margin:
+        const EdgeInsets.only(bottom: 14),
         decoration: BoxDecoration(
-          color: isRead ? Colors.white : const Color(0xFFEAF4FF),
-          borderRadius: BorderRadius.circular(20),
+          color: isRead
+              ? Colors.white
+              : const Color(0xFFEAF4FF),
+          borderRadius:
+          BorderRadius.circular(20),
           border: Border.all(
-            color: isRead ? Colors.transparent : const Color(0xFF339BFF),
+            color: isRead
+                ? Colors.transparent
+                : const Color(0xFF339BFF),
             width: 1.1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.06),
+              color:
+              Colors.black.withOpacity(0.06),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
           ],
         ),
-        child: ListTile(
-          onTap: () => markAsRead(item),
-          contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          leading: CircleAvatar(
-            backgroundColor: color.withOpacity(0.12),
-            child: Icon(
-              getNotificationIcon(type, title),
-              color: color,
+        child: InkWell(
+          borderRadius:
+          BorderRadius.circular(20),
+          onTap: () {
+            openNotificationDetails(item);
+          },
+          child: Padding(
+            padding:
+            const EdgeInsets.fromLTRB(
+              15,
+              14,
+              10,
+              14,
             ),
-          ),
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontWeight: isRead ? FontWeight.w600 : FontWeight.bold,
-                    color: const Color(0xFF1F2937),
-                  ),
-                ),
-              ),
-              if (!isRead)
-                Container(
-                  width: 9,
-                  height: 9,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-            ],
-          ),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
+              crossAxisAlignment:
+              CrossAxisAlignment.center,
               children: [
-                Text(
-                  message,
-                  style: TextStyle(
-                    color: isRead ? Colors.black54 : Colors.black87,
-                    fontSize: 13,
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color:
+                    color.withOpacity(0.12),
+                    borderRadius:
+                    BorderRadius.circular(15),
+                  ),
+                  child: Icon(
+                    getNotificationIcon(
+                      type,
+                      title,
+                    ),
+                    color: color,
+                    size: 24,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  formatDate(item['created_at']),
-                  style: const TextStyle(
-                    color: Colors.black45,
-                    fontSize: 11,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title.isEmpty
+                            ? 'Notification'
+                            : title,
+                        maxLines: 2,
+                        overflow:
+                        TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          height: 1.3,
+                          fontWeight: isRead
+                              ? FontWeight.w600
+                              : FontWeight.bold,
+                          color: const Color(
+                            0xFF1F2937,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.schedule_rounded,
+                            color: Colors.black38,
+                            size: 15,
+                          ),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              formatDate(
+                                item['created_at'],
+                              ),
+                              maxLines: 1,
+                              overflow:
+                              TextOverflow
+                                  .ellipsis,
+                              style:
+                              const TextStyle(
+                                color:
+                                Colors.black45,
+                                fontSize: 10.8,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding:
+                            const EdgeInsets
+                                .symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration:
+                            BoxDecoration(
+                              color: isRead
+                                  ? Colors
+                                  .grey.shade100
+                                  : const Color(
+                                0xFF339BFF,
+                              ).withOpacity(
+                                0.12,
+                              ),
+                              borderRadius:
+                              BorderRadius
+                                  .circular(
+                                20,
+                              ),
+                            ),
+                            child: Text(
+                              isRead
+                                  ? 'READ'
+                                  : 'NEW',
+                              style: TextStyle(
+                                color: isRead
+                                    ? Colors.black45
+                                    : const Color(
+                                  0xFF339BFF,
+                                ),
+                                fontSize: 9.5,
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
+                ),
+                IconButton(
+                  tooltip:
+                  'Delete Notification',
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    color: Colors.red,
+                    size: 21,
+                  ),
+                  onPressed: () {
+                    confirmAndDeleteNotification(
+                      item,
+                    );
+                  },
                 ),
               ],
             ),
-          ),
-          trailing: IconButton(
-            icon: const Icon(
-              Icons.delete_outline,
-              color: Colors.red,
-              size: 22,
-            ),
-            onPressed: () {
-              confirmAndDeleteNotification(item);
-            },
           ),
         ),
       ),

@@ -287,8 +287,30 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
     try {
       debugPrint('===== notifyAdminsAboutNewBooking START =====');
 
-      final customerName = currentCustomer?['name'] ?? 'A customer';
-      final plate = selectedVehicle?['plate_number'] ?? 'Unknown Vehicle';
+      final customerName =
+          currentCustomer?['name'] ?? 'A customer';
+
+      final plate =
+          selectedVehicle?['plate_number'] ??
+              'Unknown Vehicle';
+
+      final bookingId =
+      booking['booking_id']
+          ?.toString()
+          .trim();
+
+      final vehicleId =
+      selectedVehicle?['vehicle_id']
+          ?.toString()
+          .trim();
+
+      final customerId =
+      currentCustomer?['customer_id']
+          ?.toString()
+          .trim();
+
+      const targetPage = 'admin_bookings';
+      const notificationType = 'booking';
 
       const title = 'New Appointment Booking';
       final body =
@@ -306,12 +328,19 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
       for (final admin in admins) {
         debugPrint('Inserting notification for admin: ${admin['admin_id']}');
 
-        await supabase.from('admin_notifications').insert({
+        await supabase
+            .from('admin_notifications')
+            .insert({
           'admin_id': admin['admin_id'],
           'title': title,
           'message': body,
           'is_read': false,
-          'notification_type': 'booking',
+          'notification_type':
+          notificationType,
+          'target_page': targetPage,
+          'booking_id': bookingId,
+          'vehicle_id': vehicleId,
+          'customer_id': customerId,
         });
 
         debugPrint('Insert success for admin: ${admin['admin_id']}');
@@ -355,6 +384,20 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
             'token': token,
             'title': title,
             'body': body,
+            'data': {
+              'target_page': targetPage,
+              'notification_type':
+              notificationType,
+              if (bookingId != null &&
+                  bookingId.isNotEmpty)
+                'booking_id': bookingId,
+              if (vehicleId != null &&
+                  vehicleId.isNotEmpty)
+                'vehicle_id': vehicleId,
+              if (customerId != null &&
+                  customerId.isNotEmpty)
+                'customer_id': customerId,
+            },
           },
         );
 
@@ -570,100 +613,675 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
     }
 
     if (selectedServices.isEmpty) {
-      showMessage('Please select at least one service.');
+      showMessage(
+        'Please select at least one service.',
+      );
       return;
     }
 
-    showDialog(
+    showDialog<void>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Confirm Booking'),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          content: SizedBox(
-            width: 360,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  buildDetailRow(
-                    'Plate Number',
-                    selectedVehicle!['plate_number'] ?? '',
-                  ),
-                  buildDetailRow(
-                    'Car Model',
-                    selectedVehicle!['car_model'] ?? '',
-                  ),
-                  buildDetailRow('Booking Date', widget.selectedDate),
-                  if (problemController.text.trim().isNotEmpty)
-                    buildDetailRow('Notes', problemController.text.trim()),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Selected Services:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  ...selectedServices.map((service) {
-                    final price =
-                        double.tryParse(service['price'].toString()) ?? 0;
+      builder: (dialogContext) {
+        final plateNumber =
+            selectedVehicle!['plate_number']
+                ?.toString() ??
+                '';
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text('• ${service['service_name']}'),
+        final carModel =
+            selectedVehicle!['car_model']
+                ?.toString() ??
+                '';
+
+        final notes =
+        problemController.text.trim();
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 470,
+              maxHeight:
+              MediaQuery.of(dialogContext)
+                  .size
+                  .height *
+                  0.88,
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color:
+                    Colors.black.withOpacity(
+                      0.16,
+                    ),
+                    blurRadius: 28,
+                    offset:
+                    const Offset(0, 12),
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize:
+                MainAxisSize.min,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      18,
+                      17,
+                      10,
+                      17,
+                    ),
+                    decoration:
+                    const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Color(0xFF248CF2),
+                          Color(0xFF63B3FF),
+                        ],
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration:
+                          BoxDecoration(
+                            color: Colors.white
+                                .withOpacity(0.18),
+                            borderRadius:
+                            BorderRadius.circular(
+                              16,
+                            ),
                           ),
-                          Text(
-                            'RM ${price.toStringAsFixed(2)}',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          child: const Icon(
+                            Icons
+                                .event_available_rounded,
+                            color: Colors.white,
+                            size: 29,
+                          ),
+                        ),
+                        const SizedBox(width: 13),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+                            children: [
+                              Text(
+                                'Confirm Booking',
+                                style: TextStyle(
+                                  color:
+                                  Colors.white,
+                                  fontSize: 19,
+                                  fontWeight:
+                                  FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Review the information before submitting',
+                                style: TextStyle(
+                                  color:
+                                  Colors.white70,
+                                  fontSize: 11.5,
+                                  fontWeight:
+                                  FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: isSubmitting
+                              ? null
+                              : () {
+                            Navigator.pop(
+                              dialogContext,
+                            );
+                          },
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child:
+                    SingleChildScrollView(
+                      padding:
+                      const EdgeInsets.all(
+                        18,
+                      ),
+                      child: Column(
+                        crossAxisAlignment:
+                        CrossAxisAlignment
+                            .start,
+                        children: [
+                          buildConfirmationSection(
+                            icon: Icons
+                                .directions_car_rounded,
+                            title:
+                            'Vehicle & Appointment',
+                            children: [
+                              buildConfirmationRow(
+                                title:
+                                'Plate Number',
+                                value:
+                                plateNumber,
+                              ),
+                              buildConfirmationRow(
+                                title: 'Car Model',
+                                value: carModel,
+                              ),
+                              buildConfirmationRow(
+                                title:
+                                'Booking Date',
+                                value: widget
+                                    .selectedDate,
+                                showDivider:
+                                false,
+                              ),
+                            ],
+                          ),
+                          if (notes.isNotEmpty) ...[
+                            const SizedBox(
+                              height: 13,
+                            ),
+                            buildConfirmationSection(
+                              icon: Icons
+                                  .description_outlined,
+                              title:
+                              'Problem / Notes',
+                              children: [
+                                Text(
+                                  notes,
+                                  style:
+                                  const TextStyle(
+                                    color: Color(
+                                      0xFF374151,
+                                    ),
+                                    fontSize: 13,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          const SizedBox(
+                            height: 13,
+                          ),
+                          buildConfirmationSection(
+                            icon:
+                            Icons.build_rounded,
+                            title:
+                            'Selected Services',
+                            children: [
+                              ...selectedServices.map(
+                                    (service) {
+                                  final price =
+                                      double.tryParse(
+                                        service[
+                                        'price']
+                                            .toString(),
+                                      ) ??
+                                          0;
+
+                                  return Container(
+                                    margin:
+                                    const EdgeInsets
+                                        .only(
+                                      bottom: 9,
+                                    ),
+                                    padding:
+                                    const EdgeInsets
+                                        .all(
+                                      12,
+                                    ),
+                                    decoration:
+                                    BoxDecoration(
+                                      color:
+                                      const Color(
+                                        0xFFF7F9FC,
+                                      ),
+                                      borderRadius:
+                                      BorderRadius
+                                          .circular(
+                                        14,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons
+                                              .check_circle_rounded,
+                                          color: Color(
+                                            0xFF339BFF,
+                                          ),
+                                          size: 20,
+                                        ),
+                                        const SizedBox(
+                                          width: 9,
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            service[
+                                            'service_name']
+                                                ?.toString() ??
+                                                '',
+                                            style:
+                                            const TextStyle(
+                                              color: Color(
+                                                0xFF1F2937,
+                                              ),
+                                              fontSize:
+                                              12.5,
+                                              fontWeight:
+                                              FontWeight
+                                                  .w600,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(
+                                          width: 8,
+                                        ),
+                                        Text(
+                                          'RM ${price.toStringAsFixed(2)}',
+                                          style:
+                                          const TextStyle(
+                                            color: Color(
+                                              0xFF339BFF,
+                                            ),
+                                            fontSize:
+                                            12.5,
+                                            fontWeight:
+                                            FontWeight
+                                                .bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(
+                            height: 13,
+                          ),
+                          Container(
+                            width: double.infinity,
+                            padding:
+                            const EdgeInsets.all(
+                              16,
+                            ),
+                            decoration:
+                            BoxDecoration(
+                              color: const Color(
+                                0xFFEAF4FF,
+                              ),
+                              borderRadius:
+                              BorderRadius.circular(
+                                18,
+                              ),
+                              border: Border.all(
+                                color: const Color(
+                                  0xFF339BFF,
+                                ).withOpacity(0.18),
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    const Expanded(
+                                      child: Text(
+                                        'Estimated Total',
+                                        style:
+                                        TextStyle(
+                                          color:
+                                          Colors.black54,
+                                          fontSize: 13,
+                                          fontWeight:
+                                          FontWeight
+                                              .w600,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      'RM ${totalPrice.toStringAsFixed(2)}',
+                                      style:
+                                      const TextStyle(
+                                        color: Color(
+                                          0xFF339BFF,
+                                        ),
+                                        fontSize: 20,
+                                        fontWeight:
+                                        FontWeight
+                                            .bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(
+                                  height: 8,
+                                ),
+                                const Row(
+                                  crossAxisAlignment:
+                                  CrossAxisAlignment
+                                      .start,
+                                  children: [
+                                    Icon(
+                                      Icons
+                                          .info_outline_rounded,
+                                      color: Color(
+                                        0xFF339BFF,
+                                      ),
+                                      size: 17,
+                                    ),
+                                    SizedBox(
+                                      width: 7,
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        'The final price may change after the workshop inspection.',
+                                        style:
+                                        TextStyle(
+                                          color:
+                                          Colors.black54,
+                                          fontSize: 11,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
-                    );
-                  }),
-                  const Divider(),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      'Estimated Total: RM ${totalPrice.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Note: Final price may change after workshop inspection.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.black54,
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      16,
+                      12,
+                      16,
+                      16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        top: BorderSide(
+                          color:
+                          Colors.grey.shade200,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child:
+                          OutlinedButton(
+                            style:
+                            OutlinedButton
+                                .styleFrom(
+                              foregroundColor:
+                              const Color(
+                                0xFF1F2937,
+                              ),
+                              side: BorderSide(
+                                color: Colors
+                                    .grey.shade300,
+                              ),
+                              padding:
+                              const EdgeInsets
+                                  .symmetric(
+                                vertical: 13,
+                              ),
+                              shape:
+                              RoundedRectangleBorder(
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                  14,
+                                ),
+                              ),
+                            ),
+                            onPressed:
+                            isSubmitting
+                                ? null
+                                : () {
+                              Navigator.pop(
+                                dialogContext,
+                              );
+                            },
+                            child:
+                            const Text(
+                              'Back',
+                              style: TextStyle(
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child:
+                          ElevatedButton.icon(
+                            style:
+                            ElevatedButton
+                                .styleFrom(
+                              backgroundColor:
+                              const Color(
+                                0xFF339BFF,
+                              ),
+                              foregroundColor:
+                              Colors.white,
+                              padding:
+                              const EdgeInsets
+                                  .symmetric(
+                                vertical: 13,
+                              ),
+                              shape:
+                              RoundedRectangleBorder(
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                  14,
+                                ),
+                              ),
+                            ),
+                            onPressed:
+                            isSubmitting
+                                ? null
+                                : () async {
+                              Navigator.pop(
+                                dialogContext,
+                              );
+                              await confirmBooking();
+                            },
+                            icon:
+                            isSubmitting
+                                ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child:
+                              CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color:
+                                Colors.white,
+                              ),
+                            )
+                                : const Icon(
+                              Icons
+                                  .check_circle_outline_rounded,
+                            ),
+                            label: Text(
+                              isSubmitting
+                                  ? 'Saving...'
+                                  : 'Confirm Booking',
+                              style:
+                              const TextStyle(
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: isSubmitting ? null : () => Navigator.pop(context),
-              child: const Text('Back'),
-            ),
-            ElevatedButton(
-              onPressed: isSubmitting
-                  ? null
-                  : () async {
-                Navigator.pop(context);
-                await confirmBooking();
-              },
-              child: Text(isSubmitting ? 'Saving...' : 'Confirm'),
-            ),
-          ],
         );
       },
+    );
+  }
+
+  Widget buildConfirmationSection({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius:
+        BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color:
+            Colors.black.withOpacity(0.035),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color:
+                  const Color(0xFFEAF4FF),
+                  borderRadius:
+                  BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  size: 19,
+                  color:
+                  const Color(0xFF339BFF),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color:
+                    Color(0xFF1F2937),
+                    fontSize: 15,
+                    fontWeight:
+                    FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 13),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget buildConfirmationRow({
+    required String title,
+    required String value,
+    bool showDivider = true,
+  }) {
+    final displayValue =
+    value.trim().isEmpty
+        ? 'Not Provided'
+        : value.trim();
+
+    return Column(
+      children: [
+        Row(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 4,
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12,
+                  fontWeight:
+                  FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 6,
+              child: Text(
+                displayValue,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  color:
+                  Color(0xFF1F2937),
+                  fontSize: 12,
+                  fontWeight:
+                  FontWeight.bold,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (showDivider) ...[
+          const SizedBox(height: 10),
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+          const SizedBox(height: 10),
+        ],
+      ],
     );
   }
 
@@ -696,67 +1314,144 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
 
   Widget buildProblemDescriptionCard() {
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin:
+      const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius:
+        BorderRadius.circular(22),
         border: Border.all(
-          color: const Color(0xFF339BFF).withOpacity(0.35),
-          width: 1.3,
+          color: const Color(0xFF339BFF)
+              .withOpacity(0.16),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 9,
-            offset: const Offset(0, 4),
+            color:
+            Colors.black.withOpacity(0.05),
+            blurRadius: 11,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              CircleAvatar(
-                backgroundColor: Color(0xFFD7E5FA),
-                child: Icon(
-                  Icons.description_outlined,
-                  color: Color(0xFF339BFF),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color:
+                  const Color(0xFFEAF4FF),
+                  borderRadius:
+                  BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons
+                      .description_outlined,
+                  color:
+                  Color(0xFF339BFF),
                 ),
               ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Problem / Service Notes',
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Problem / Service Notes',
+                      style: TextStyle(
+                        color:
+                        Color(0xFF1F2937),
+                        fontWeight:
+                        FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Help the workshop understand your request.',
+                      style: TextStyle(
+                        color: Colors.black54,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 9,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius:
+                  BorderRadius.circular(20),
+                ),
+                child: const Text(
+                  'OPTIONAL',
                   style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+                    color: Colors.black45,
+                    fontSize: 9.5,
+                    fontWeight:
+                    FontWeight.bold,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Tell the workshop about any issue, noise, warning light, or special request.',
-            style: TextStyle(
-              color: Colors.black54,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           TextField(
             controller: problemController,
             maxLines: 4,
+            maxLength: 300,
+            textCapitalization:
+            TextCapitalization.sentences,
             decoration: InputDecoration(
               hintText:
-              'Example: Engine noise, brake sound, aircond not cold, warning light appeared...',
+              'Example: Engine noise, brake sound, aircond not cold, or warning light appeared...',
+              hintStyle: const TextStyle(
+                color: Colors.black38,
+                fontSize: 12.5,
+                height: 1.4,
+              ),
+              prefixIcon: const Padding(
+                padding:
+                EdgeInsets.only(bottom: 70),
+                child: Icon(
+                  Icons.edit_note_rounded,
+                  color:
+                  Color(0xFF339BFF),
+                ),
+              ),
               filled: true,
-              fillColor: const Color(0xFFF5F7FA),
+              fillColor:
+              const Color(0xFFF7F9FC),
+              counterStyle: const TextStyle(
+                color: Colors.black38,
+                fontSize: 10,
+              ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius:
+                BorderRadius.circular(16),
                 borderSide: BorderSide.none,
+              ),
+              focusedBorder:
+              OutlineInputBorder(
+                borderRadius:
+                BorderRadius.circular(16),
+                borderSide:
+                const BorderSide(
+                  color:
+                  Color(0xFF339BFF),
+                  width: 1.3,
+                ),
               ),
             ),
           ),
@@ -765,94 +1460,248 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
     );
   }
 
-  Widget buildServiceCard(Map<String, dynamic> service) {
-    final isAvailable = isServiceAvailable(service);
-    final isSelected = selectedServices.any(
-          (item) => item['service_id'] == service['service_id'],
+  Widget buildServiceCard(
+      Map<String, dynamic> service,
+      ) {
+    final isAvailable =
+    isServiceAvailable(service);
+
+    final isSelected =
+    selectedServices.any(
+          (item) =>
+      item['service_id'] ==
+          service['service_id'],
     );
 
-    final price = double.tryParse(service['price'].toString()) ?? 0;
+    final price =
+        double.tryParse(
+          service['price'].toString(),
+        ) ??
+            0;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+    return AnimatedContainer(
+      duration:
+      const Duration(milliseconds: 180),
+      margin:
+      const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-        color: isAvailable ? Colors.white : Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(20),
+        color: isAvailable
+            ? Colors.white
+            : Colors.grey.shade200,
+        borderRadius:
+        BorderRadius.circular(22),
         border: Border.all(
-          color: isSelected ? const Color(0xFF339BFF) : Colors.transparent,
-          width: 1.5,
+          color: isSelected
+              ? const Color(0xFF339BFF)
+              : const Color(0xFF339BFF)
+              .withOpacity(0.08),
+          width: isSelected ? 1.8 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
+            color: isSelected
+                ? const Color(0xFF339BFF)
+                .withOpacity(0.11)
+                : Colors.black.withOpacity(
+              0.045,
+            ),
+            blurRadius:
+            isSelected ? 14 : 9,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () => toggleService(service),
+        borderRadius:
+        BorderRadius.circular(22),
+        onTap: () =>
+            toggleService(service),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding:
+          const EdgeInsets.all(15),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 25,
-                backgroundColor:
-                isAvailable ? const Color(0xFFD7E5FA) : Colors.grey.shade300,
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: isAvailable
+                      ? isSelected
+                      ? const Color(
+                    0xFF339BFF,
+                  )
+                      : const Color(
+                    0xFFEAF4FF,
+                  )
+                      : Colors.grey.shade300,
+                  borderRadius:
+                  BorderRadius.circular(
+                    17,
+                  ),
+                ),
                 child: Icon(
-                  Icons.build,
-                  color: isAvailable ? const Color(0xFF339BFF) : Colors.grey,
+                  Icons
+                      .car_repair_rounded,
+                  color: isAvailable
+                      ? isSelected
+                      ? Colors.white
+                      : const Color(
+                    0xFF339BFF,
+                  )
+                      : Colors.grey,
+                  size: 27,
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 13),
               Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
                   children: [
                     Text(
-                      service['service_name'] ?? '',
+                      service[
+                      'service_name']
+                          ?.toString() ??
+                          '',
+                      maxLines: 2,
+                      overflow:
+                      TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: isAvailable ? Colors.black : Colors.black45,
+                        color: isAvailable
+                            ? const Color(
+                          0xFF1F2937,
+                        )
+                            : Colors.black45,
+                        fontWeight:
+                        FontWeight.bold,
+                        fontSize: 15.5,
+                        height: 1.25,
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'RM ${price.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        color: Colors.black54,
-                        fontSize: 13,
-                      ),
+                    const SizedBox(
+                      height: 8,
                     ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: getServiceStatusBackgroundColor(isAvailable),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        isAvailable ? 'Available' : 'Not Available',
-                        style: TextStyle(
-                          color: getServiceStatusColor(isAvailable),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11,
+                    Row(
+                      children: [
+                        Container(
+                          padding:
+                          const EdgeInsets
+                              .symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration:
+                          BoxDecoration(
+                            color:
+                            getServiceStatusBackgroundColor(
+                              isAvailable,
+                            ),
+                            borderRadius:
+                            BorderRadius
+                                .circular(
+                              20,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize:
+                            MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isAvailable
+                                    ? Icons
+                                    .check_circle_outline_rounded
+                                    : Icons
+                                    .block_rounded,
+                                color:
+                                getServiceStatusColor(
+                                  isAvailable,
+                                ),
+                                size: 13,
+                              ),
+                              const SizedBox(
+                                width: 5,
+                              ),
+                              Text(
+                                isAvailable
+                                    ? 'Available'
+                                    : 'Not Available',
+                                style:
+                                TextStyle(
+                                  color:
+                                  getServiceStatusColor(
+                                    isAvailable,
+                                  ),
+                                  fontWeight:
+                                  FontWeight
+                                      .bold,
+                                  fontSize: 10.5,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              Checkbox(
-                value: isSelected,
-                activeColor: const Color(0xFF339BFF),
-                onChanged: isAvailable ? (_) => toggleService(service) : null,
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment:
+                CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'RM ${price.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      color: isAvailable
+                          ? const Color(
+                        0xFF339BFF,
+                      )
+                          : Colors.black38,
+                      fontSize: 14.5,
+                      fontWeight:
+                      FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  AnimatedContainer(
+                    duration: const Duration(
+                      milliseconds: 180,
+                    ),
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? const Color(
+                        0xFF339BFF,
+                      )
+                          : Colors.white,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isAvailable
+                            ? const Color(
+                          0xFF339BFF,
+                        )
+                            : Colors.grey,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Icon(
+                      isSelected
+                          ? Icons.check_rounded
+                          : Icons.add_rounded,
+                      color: isSelected
+                          ? Colors.white
+                          : isAvailable
+                          ? const Color(
+                        0xFF339BFF,
+                      )
+                          : Colors.grey,
+                      size: 19,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -870,32 +1719,64 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95),
-          borderRadius: BorderRadius.circular(18),
+          color:
+          Colors.white.withOpacity(0.97),
+          borderRadius:
+          BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color:
+              Colors.black.withOpacity(0.05),
+              blurRadius: 9,
+              offset:
+              const Offset(0, 4),
+            ),
+          ],
         ),
         child: Row(
           children: [
-            CircleAvatar(
-              backgroundColor: const Color(0xFFD7E5FA),
-              child: Icon(icon, color: const Color(0xFF339BFF)),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color:
+                const Color(0xFFEAF4FF),
+                borderRadius:
+                BorderRadius.circular(13),
+              ),
+              child: Icon(
+                icon,
+                color:
+                const Color(0xFF339BFF),
+                size: 22,
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 12,
-                    ),
-                  ),
                   Text(
                     value,
                     style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
+                      color:
+                      Color(0xFF1F2937),
+                      fontSize: 21,
+                      fontWeight:
+                      FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow:
+                    TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 11.5,
+                      fontWeight:
+                      FontWeight.w600,
                     ),
                   ),
                 ],
@@ -978,79 +1859,312 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
                   ),
                 ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding:
+                          const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white
+                                .withOpacity(0.18),
+                            borderRadius:
+                            BorderRadius.circular(
+                              20,
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize:
+                            MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons
+                                    .looks_two_rounded,
+                                color: Colors.white,
+                                size: 15,
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                'STEP 2 OF 2',
+                                style: TextStyle(
+                                  color:
+                                  Colors.white,
+                                  fontSize: 10,
+                                  fontWeight:
+                                  FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 11),
                     const Text(
                       'Select Your Service',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 23,
+                        fontWeight:
+                        FontWeight.bold,
                       ),
                     ),
-
                     const SizedBox(height: 6),
-
-                    Text(
-                      'Booking Date: ${widget.selectedDate}',
-                      style: const TextStyle(
+                    const Text(
+                      'Choose your vehicle and the services required.',
+                      style: TextStyle(
                         color: Colors.white70,
-                        fontSize: 14,
+                        fontSize: 13.5,
                       ),
                     ),
-
+                    const SizedBox(height: 12),
+                    Container(
+                      padding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white
+                            .withOpacity(0.16),
+                        borderRadius:
+                        BorderRadius.circular(
+                          14,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize:
+                        MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons
+                                .calendar_month_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 7),
+                          Text(
+                            widget.selectedDate,
+                            style:
+                            const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight:
+                              FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 16),
-
                     Row(
                       children: [
                         buildSummaryCard(
-                          icon: Icons.build,
-                          title: 'Available',
-                          value: '$availableCount',
+                          icon: Icons
+                              .home_repair_service_rounded,
+                          title:
+                          'Available Services',
+                          value:
+                          '$availableCount',
                         ),
                         const SizedBox(width: 12),
                         buildSummaryCard(
-                          icon: Icons.check_circle,
-                          title: 'Selected',
-                          value: '${selectedServices.length}',
+                          icon: Icons
+                              .check_circle_rounded,
+                          title:
+                          'Selected Services',
+                          value:
+                          '${selectedServices.length}',
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 16),
-
-                    DropdownButtonFormField<String>(
-                      value: selectedVehicle?['vehicle_id'],
-                      decoration: InputDecoration(
-                        labelText: 'Select Vehicle',
-                        prefixIcon: const Icon(
-                          Icons.directions_car,
+                    Container(
+                      width: double.infinity,
+                      padding:
+                      const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius:
+                        BorderRadius.circular(
+                          19,
                         ),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      items: vehicles.map((vehicle) {
-                        return DropdownMenuItem<String>(
-                          value: vehicle['vehicle_id'],
-                          child: Text(
-                            '${vehicle['plate_number']} - '
-                                '${vehicle['car_model']}',
-                            overflow: TextOverflow.ellipsis,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black
+                                .withOpacity(0.06),
+                            blurRadius: 10,
+                            offset:
+                            const Offset(0, 4),
                           ),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          selectedVehicle = vehicles.firstWhere(
-                                (vehicle) =>
-                            vehicle['vehicle_id'] == value,
-                          );
-                        });
-                      },
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(
+                                Icons
+                                    .directions_car_rounded,
+                                color: Color(
+                                  0xFF339BFF,
+                                ),
+                                size: 20,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Select Vehicle',
+                                style: TextStyle(
+                                  color: Color(
+                                    0xFF1F2937,
+                                  ),
+                                  fontSize: 14,
+                                  fontWeight:
+                                  FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          if (vehicles.isEmpty)
+                            Container(
+                              width: double.infinity,
+                              padding:
+                              const EdgeInsets.all(
+                                13,
+                              ),
+                              decoration:
+                              BoxDecoration(
+                                color:
+                                Colors.orange.shade50,
+                                borderRadius:
+                                BorderRadius.circular(
+                                  14,
+                                ),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(
+                                    Icons
+                                        .warning_amber_rounded,
+                                    color:
+                                    Colors.orange,
+                                  ),
+                                  SizedBox(width: 9),
+                                  Expanded(
+                                    child: Text(
+                                      'No vehicle is linked to this account.',
+                                      style:
+                                      TextStyle(
+                                        color:
+                                        Colors.black54,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            DropdownButtonFormField<
+                                String>(
+                              value: selectedVehicle?[
+                              'vehicle_id'],
+                              isExpanded: true,
+                              decoration:
+                              InputDecoration(
+                                prefixIcon:
+                                const Icon(
+                                  Icons
+                                      .garage_rounded,
+                                  color: Color(
+                                    0xFF339BFF,
+                                  ),
+                                ),
+                                filled: true,
+                                fillColor:
+                                const Color(
+                                  0xFFF7F9FC,
+                                ),
+                                contentPadding:
+                                const EdgeInsets
+                                    .symmetric(
+                                  horizontal: 14,
+                                  vertical: 13,
+                                ),
+                                border:
+                                OutlineInputBorder(
+                                  borderRadius:
+                                  BorderRadius
+                                      .circular(
+                                    15,
+                                  ),
+                                  borderSide:
+                                  BorderSide.none,
+                                ),
+                                focusedBorder:
+                                OutlineInputBorder(
+                                  borderRadius:
+                                  BorderRadius
+                                      .circular(
+                                    15,
+                                  ),
+                                  borderSide:
+                                  const BorderSide(
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              items:
+                              vehicles.map(
+                                    (vehicle) {
+                                  return DropdownMenuItem<
+                                      String>(
+                                    value: vehicle[
+                                    'vehicle_id'],
+                                    child: Text(
+                                      '${vehicle['plate_number']}  •  '
+                                          '${vehicle['car_model']}',
+                                      overflow:
+                                      TextOverflow
+                                          .ellipsis,
+                                      style:
+                                      const TextStyle(
+                                        color: Color(
+                                          0xFF1F2937,
+                                        ),
+                                        fontWeight:
+                                        FontWeight
+                                            .w600,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ).toList(),
+                              onChanged: (value) {
+                                setState(() {
+                                  selectedVehicle =
+                                      vehicles
+                                          .firstWhere(
+                                            (vehicle) =>
+                                        vehicle[
+                                        'vehicle_id'] ==
+                                            value,
+                                      );
+                                });
+                              },
+                            ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1094,64 +2208,163 @@ class _ChooseServiceTypePageState extends State<ChooseServiceTypePage> {
             if (services.isNotEmpty)
               SliverToBoxAdapter(
                 child: Container(
-                  margin: const EdgeInsets.only(top: 4),
-                  padding: const EdgeInsets.fromLTRB(
+                  margin:
+                  const EdgeInsets.fromLTRB(
                     16,
+                    6,
                     16,
-                    16,
-                    20,
+                    0,
                   ),
+                  padding:
+                  const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFD7E5FA),
+                    color: Colors.white,
+                    borderRadius:
+                    BorderRadius.circular(
+                      22,
+                    ),
+                    border: Border.all(
+                      color:
+                      const Color(0xFF339BFF)
+                          .withOpacity(0.12),
+                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.06),
-                        blurRadius: 10,
-                        offset: const Offset(0, -4),
+                        color: Colors.black
+                            .withOpacity(0.07),
+                        blurRadius: 14,
+                        offset:
+                        const Offset(0, 6),
                       ),
                     ],
                   ),
                   child: Column(
                     children: [
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          'Estimated Total: '
-                              'RM ${totalPrice.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 17,
+                      Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration:
+                            BoxDecoration(
+                              color: const Color(
+                                0xFFEAF4FF,
+                              ),
+                              borderRadius:
+                              BorderRadius
+                                  .circular(
+                                13,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons
+                                  .receipt_long_rounded,
+                              color: Color(
+                                0xFF339BFF,
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 11),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                              CrossAxisAlignment
+                                  .start,
+                              children: [
+                                Text(
+                                  '${selectedServices.length} service(s) selected',
+                                  style:
+                                  const TextStyle(
+                                    color: Color(
+                                      0xFF1F2937,
+                                    ),
+                                    fontSize: 12.5,
+                                    fontWeight:
+                                    FontWeight
+                                        .w600,
+                                  ),
+                                ),
+                                const SizedBox(
+                                  height: 3,
+                                ),
+                                const Text(
+                                  'Estimated Total',
+                                  style:
+                                  TextStyle(
+                                    color:
+                                    Colors.black45,
+                                    fontSize: 10.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            'RM ${totalPrice.toStringAsFixed(2)}',
+                            style:
+                            const TextStyle(
+                              color: Color(
+                                0xFF339BFF,
+                              ),
+                              fontWeight:
+                              FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ],
                       ),
-
-                      const SizedBox(height: 12),
-
+                      const SizedBox(height: 14),
                       SizedBox(
                         width: double.infinity,
                         height: 52,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
+                        child:
+                        ElevatedButton.icon(
+                          style:
+                          ElevatedButton
+                              .styleFrom(
                             backgroundColor:
-                            const Color(0xFF339BFF),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
+                            const Color(
+                              0xFF339BFF,
+                            ),
+                            foregroundColor:
+                            Colors.white,
+                            elevation: 0,
+                            shape:
+                            RoundedRectangleBorder(
                               borderRadius:
-                              BorderRadius.circular(16),
+                              BorderRadius
+                                  .circular(
+                                16,
+                              ),
                             ),
                           ),
-                          onPressed: isSubmitting
+                          onPressed:
+                          isSubmitting
                               ? null
                               : showConfirmBookingDialog,
-                          icon: const Icon(
-                            Icons.calendar_month,
+                          icon: isSubmitting
+                              ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child:
+                            CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color:
+                              Colors.white,
+                            ),
+                          )
+                              : const Icon(
+                            Icons
+                                .calendar_month_rounded,
                           ),
                           label: Text(
                             isSubmitting
-                                ? 'Booking...'
-                                : 'Book Service',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
+                                ? 'Creating Booking...'
+                                : 'Review & Book Service',
+                            style:
+                            const TextStyle(
+                              fontWeight:
+                              FontWeight.bold,
                             ),
                           ),
                         ),

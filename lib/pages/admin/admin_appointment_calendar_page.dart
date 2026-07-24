@@ -40,6 +40,12 @@ class _AdminAppointmentCalendarPageState
     return onlyDate.isBefore(current);
   }
 
+  bool isTodayDate(DateTime date) {
+    return date.year == today.year &&
+        date.month == today.month &&
+        date.day == today.day;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1231,6 +1237,97 @@ class _AdminAppointmentCalendarPageState
     );
   }
 
+  Widget buildCalendarLegendItem({
+    required Color color,
+    required String label,
+    IconData? icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 9,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: color.withOpacity(0.24),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null)
+            Icon(
+              icon,
+              size: 13,
+              color: color,
+            )
+          else
+            Container(
+              width: 9,
+              height: 9,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+              ),
+            ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10.5,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildCalendarLegend() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFF339BFF).withOpacity(0.10),
+        ),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        alignment: WrapAlignment.center,
+        children: [
+          buildCalendarLegendItem(
+            color: const Color(0xFF339BFF),
+            label: 'Available',
+          ),
+          buildCalendarLegendItem(
+            color: Colors.orange,
+            label: 'Full',
+          ),
+          buildCalendarLegendItem(
+            color: Colors.red,
+            label: 'Closed',
+          ),
+          buildCalendarLegendItem(
+            color: const Color(0xFF1976D2),
+            label: 'Today',
+            icon: Icons.today,
+          ),
+          buildCalendarLegendItem(
+            color: Colors.grey,
+            label: 'Past',
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final days = generateMonthDays(currentMonth);
@@ -1254,262 +1351,762 @@ class _AdminAppointmentCalendarPageState
             },
             icon: const CircleAvatar(
               backgroundColor: Colors.white,
-              child: Icon(Icons.person, color: Color(0xFF339BFF)),
+              child: Icon(
+                Icons.person,
+                color: Color(0xFF339BFF),
+              ),
             ),
           ),
         ],
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
           : Stack(
         children: [
-          Column(
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF339BFF),
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(26),
-                    bottomRight: Radius.circular(26),
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: buildSummaryCard(
-                            icon: Icons.event_available,
-                            title: 'Daily Limit',
-                            value: '$defaultDailyLimit',
-                            subtitle: 'Bookings / day',
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: buildSummaryCard(
-                            icon: Icons.block,
-                            title: 'Closed Days',
-                            value: '$closedDayCount',
-                            subtitle: 'This month',
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    SizedBox(
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragEnd: (details) {
+              final velocity =
+                  details.primaryVelocity ?? 0;
+
+              if (velocity < -250) {
+                nextMonth();
+              } else if (velocity > 250) {
+                previousMonth();
+              }
+            },
+            child: RefreshIndicator(
+              onRefresh: () {
+                return loadCalendarData();
+              },
+              child: CustomScrollView(
+                physics:
+                const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Container(
                       width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF339BFF),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        onPressed: showDefaultLimitDialog,
-                        icon: const Icon(Icons.tune),
-                        label: const Text(
-                          'Manage Appointment Limit',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                      padding:
+                      const EdgeInsets.fromLTRB(
+                        16,
+                        16,
+                        16,
+                        20,
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      circleIconButton(
-                        icon: Icons.arrow_back_ios_new,
-                        onTap: previousMonth,
-                      ),
-                      Text(
-                        monthTitle(currentMonth),
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
+                      decoration:
+                      const BoxDecoration(
+                        color: Color(0xFF339BFF),
+                        borderRadius:
+                        BorderRadius.only(
+                          bottomLeft:
+                          Radius.circular(26),
+                          bottomRight:
+                          Radius.circular(26),
                         ),
                       ),
-                      circleIconButton(
-                        icon: Icons.arrow_forward_ios,
-                        onTap: nextMonth,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(child: Center(child: Text('Mon'))),
-                    Expanded(child: Center(child: Text('Tue'))),
-                    Expanded(child: Center(child: Text('Wed'))),
-                    Expanded(child: Center(child: Text('Thu'))),
-                    Expanded(child: Center(child: Text('Fri'))),
-                    Expanded(child: Center(child: Text('Sat'))),
-                    Expanded(child: Center(child: Text('Sun'))),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 6),
-              Expanded(
-                child: GestureDetector(
-                  onHorizontalDragEnd: (details) {
-                    final velocity = details.primaryVelocity ?? 0;
-
-                    if (velocity < 0) {
-                      nextMonth();
-                    } else if (velocity > 0) {
-                      previousMonth();
-                    }
-                  },
-                  child: GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    itemCount: days.length,
-                    gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 7,
-                      crossAxisSpacing: 6,
-                      mainAxisSpacing: 6,
-                      childAspectRatio: 0.72,
-                    ),
-                    itemBuilder: (context, index) {
-                      final date = days[index];
-
-                      if (date == null) {
-                        return const SizedBox();
-                      }
-
-                      final isClosed = isDateClosed(date);
-                      final limit = getLimitForDate(date);
-                      final booked = getBookingCount(date);
-                      final isFull = !isClosed && booked >= limit;
-                      final isPast = isPastDate(date);
-
-                      return GestureDetector(
-                        onTap: () {
-                          if (isPast) {
-                            showMessage('Past dates cannot be modified.');
-                            return;
-                          }
-
-                          showDateSettingDialog(date);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 250),
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: isPast
-                                ? Colors.grey.shade200
-                                : isClosed
-                                ? Colors.red.shade50
-                                : isFull
-                                ? Colors.orange.shade50
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: isPast
-                                  ? Colors.grey
-                                  : isClosed
-                                  ? Colors.red
-                                  : isFull
-                                  ? Colors.orange
-                                  : const Color(0xFF339BFF)
-                                  .withOpacity(0.18),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.04),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child:
+                                buildSummaryCard(
+                                  icon: Icons
+                                      .event_available,
+                                  title: 'Daily Limit',
+                                  value:
+                                  '$defaultDailyLimit',
+                                  subtitle:
+                                  'Bookings / day',
+                                ),
+                              ),
+                              const SizedBox(
+                                width: 12,
+                              ),
+                              Expanded(
+                                child:
+                                buildSummaryCard(
+                                  icon: Icons.block,
+                                  title: 'Closed Days',
+                                  value:
+                                  '$closedDayCount',
+                                  subtitle:
+                                  'This month',
+                                ),
                               ),
                             ],
                           ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                '${date.day}',
+                          const SizedBox(
+                            height: 14,
+                          ),
+                          SizedBox(
+                            width:
+                            double.infinity,
+                            height: 48,
+                            child:
+                            ElevatedButton.icon(
+                              style:
+                              ElevatedButton
+                                  .styleFrom(
+                                backgroundColor:
+                                Colors.white,
+                                foregroundColor:
+                                const Color(
+                                  0xFF339BFF,
+                                ),
+                                shape:
+                                RoundedRectangleBorder(
+                                  borderRadius:
+                                  BorderRadius
+                                      .circular(
+                                    14,
+                                  ),
+                                ),
+                              ),
+                              onPressed:
+                              showDefaultLimitDialog,
+                              icon: const Icon(
+                                Icons.tune,
+                              ),
+                              label: const Text(
+                                'Manage Appointment Limit',
                                 style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                  color: isPast
+                                  fontWeight:
+                                  FontWeight
+                                      .bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding:
+                      const EdgeInsets.fromLTRB(
+                        16,
+                        16,
+                        16,
+                        10,
+                      ),
+                      child: Container(
+                        padding:
+                        const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        decoration:
+                        BoxDecoration(
+                          color: Colors.white,
+                          borderRadius:
+                          BorderRadius.circular(
+                            18,
+                          ),
+                          border: Border.all(
+                            color: const Color(
+                              0xFF339BFF,
+                            ).withOpacity(
+                              0.10,
+                            ),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black
+                                  .withOpacity(
+                                0.04,
+                              ),
+                              blurRadius: 8,
+                              offset:
+                              const Offset(
+                                0,
+                                3,
+                              ),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            circleIconButton(
+                              icon: Icons
+                                  .arrow_back_ios_new,
+                              onTap:
+                              previousMonth,
+                            ),
+                            const SizedBox(
+                              width: 10,
+                            ),
+                            Expanded(
+                              child: Column(
+                                children: [
+                                  Text(
+                                    monthTitle(
+                                      currentMonth,
+                                    ),
+                                    textAlign:
+                                    TextAlign
+                                        .center,
+                                    style:
+                                    const TextStyle(
+                                      color: Color(
+                                        0xFF1F2937,
+                                      ),
+                                      fontSize: 20,
+                                      fontWeight:
+                                      FontWeight
+                                          .bold,
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    height: 4,
+                                  ),
+                                  const Row(
+                                    mainAxisAlignment:
+                                    MainAxisAlignment
+                                        .center,
+                                    children: [
+                                      Icon(
+                                        Icons.swipe,
+                                        size: 13,
+                                        color: Colors
+                                            .black45,
+                                      ),
+                                      SizedBox(
+                                        width: 5,
+                                      ),
+                                      Flexible(
+                                        child: Text(
+                                          'Swipe or use arrows to change month',
+                                          textAlign:
+                                          TextAlign
+                                              .center,
+                                          style:
+                                          TextStyle(
+                                            color:
+                                            Colors
+                                                .black45,
+                                            fontSize:
+                                            10.5,
+                                            fontWeight:
+                                            FontWeight
+                                                .w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(
+                              width: 10,
+                            ),
+                            circleIconButton(
+                              icon: Icons
+                                  .arrow_forward_ios,
+                              onTap: nextMonth,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 16,
+                      ),
+                      child: Container(
+                        padding:
+                        const EdgeInsets.symmetric(
+                          vertical: 9,
+                        ),
+                        decoration:
+                        BoxDecoration(
+                          color: const Color(
+                            0xFFEAF4FF,
+                          ),
+                          borderRadius:
+                          BorderRadius.circular(
+                            14,
+                          ),
+                        ),
+                        child: const Row(
+                          children: [
+                            Expanded(
+                              child: Center(
+                                child: Text(
+                                  'Mon',
+                                  style:
+                                  TextStyle(
+                                    fontSize: 11,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Center(
+                                child: Text(
+                                  'Tue',
+                                  style:
+                                  TextStyle(
+                                    fontSize: 11,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Center(
+                                child: Text(
+                                  'Wed',
+                                  style:
+                                  TextStyle(
+                                    fontSize: 11,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Center(
+                                child: Text(
+                                  'Thu',
+                                  style:
+                                  TextStyle(
+                                    fontSize: 11,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Center(
+                                child: Text(
+                                  'Fri',
+                                  style:
+                                  TextStyle(
+                                    fontSize: 11,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Center(
+                                child: Text(
+                                  'Sat',
+                                  style:
+                                  TextStyle(
+                                    fontSize: 11,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Center(
+                                child: Text(
+                                  'Sun',
+                                  style:
+                                  TextStyle(
+                                    fontSize: 11,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SliverToBoxAdapter(
+                    child: SizedBox(height: 8),
+                  ),
+
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 16,
+                      ),
+                      child:
+                      buildCalendarLegend(),
+                    ),
+                  ),
+
+                  const SliverToBoxAdapter(
+                    child: SizedBox(height: 8),
+                  ),
+
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding:
+                      EdgeInsets.symmetric(
+                        horizontal: 16,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons
+                                .touch_app_outlined,
+                            size: 15,
+                            color:
+                            Colors.black45,
+                          ),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Tap a future date to manage its limit or close the workshop.',
+                              style:
+                              TextStyle(
+                                color:
+                                Colors.black45,
+                                fontSize: 11,
+                                fontWeight:
+                                FontWeight
+                                    .w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SliverToBoxAdapter(
+                    child: SizedBox(height: 8),
+                  ),
+
+                  SliverPadding(
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      16,
+                      0,
+                      16,
+                      28,
+                    ),
+                    sliver: SliverGrid(
+                      gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 7,
+                        crossAxisSpacing: 6,
+                        mainAxisSpacing: 6,
+                        mainAxisExtent: 72,
+                      ),
+                      delegate:
+                      SliverChildBuilderDelegate(
+                            (context, index) {
+                          final date =
+                          days[index];
+
+                          if (date == null) {
+                            return const SizedBox();
+                          }
+
+                          final isClosed =
+                          isDateClosed(
+                            date,
+                          );
+
+                          final limit =
+                          getLimitForDate(
+                            date,
+                          );
+
+                          final booked =
+                          getBookingCount(
+                            date,
+                          );
+
+                          final isFull =
+                              !isClosed &&
+                                  booked >= limit;
+
+                          final isPast =
+                          isPastDate(
+                            date,
+                          );
+
+                          final isTodayValue =
+                          isTodayDate(
+                            date,
+                          );
+
+                          return GestureDetector(
+                            onTap: () {
+                              if (isPast) {
+                                showMessage(
+                                  'Past dates cannot be modified.',
+                                );
+                                return;
+                              }
+
+                              showDateSettingDialog(
+                                date,
+                              );
+                            },
+                            child:
+                            AnimatedContainer(
+                              duration:
+                              const Duration(
+                                milliseconds: 250,
+                              ),
+                              padding:
+                              const EdgeInsets
+                                  .symmetric(
+                                horizontal: 4,
+                                vertical: 5,
+                              ),
+                              decoration:
+                              BoxDecoration(
+                                color: isPast
+                                    ? Colors.grey
+                                    .shade200
+                                    : isClosed
+                                    ? Colors.red
+                                    .shade50
+                                    : isFull
+                                    ? Colors.orange
+                                    .shade50
+                                    : isTodayValue
+                                    ? const Color(
+                                  0xFFEAF4FF,
+                                )
+                                    : Colors.white,
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                  13,
+                                ),
+                                border:
+                                Border.all(
+                                  width:
+                                  isTodayValue
+                                      ? 2
+                                      : 1,
+                                  color: isTodayValue
+                                      ? const Color(
+                                    0xFF1976D2,
+                                  )
+                                      : isPast
                                       ? Colors.grey
                                       : isClosed
                                       ? Colors.red
                                       : isFull
                                       ? Colors.orange
-                                      : Colors.black,
-                                ),
-                              ),
-                              const SizedBox(height: 5),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isPast
-                                      ? Colors.grey.shade300
-                                      : isClosed
-                                      ? Colors.red.shade100
-                                      : isFull
-                                      ? Colors.orange.shade100
-                                      : const Color(0xFFD7E5FA),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: FittedBox(
-                                  child: Text(
-                                    isPast
-                                        ? 'Past'
-                                        : isClosed
-                                        ? 'Closed'
-                                        : isFull
-                                        ? 'Full'
-                                        : '$booked/$limit',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      fontSize: 8,
-                                      fontWeight: FontWeight.bold,
-                                      color: isPast
-                                          ? Colors.grey.shade700
-                                          : isClosed
-                                          ? Colors.red
-                                          : isFull
-                                          ? Colors.orange
-                                          : const Color(
-                                          0xFF339BFF),
-                                    ),
+                                      : const Color(
+                                    0xFF339BFF,
+                                  )
+                                      .withOpacity(
+                                    0.18,
                                   ),
                                 ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: isTodayValue
+                                        ? const Color(
+                                      0xFF1976D2,
+                                    )
+                                        .withOpacity(
+                                      0.15,
+                                    )
+                                        : Colors.black
+                                        .withOpacity(
+                                      0.04,
+                                    ),
+                                    blurRadius:
+                                    isTodayValue
+                                        ? 9
+                                        : 6,
+                                    offset:
+                                    const Offset(
+                                      0,
+                                      3,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
+                              child: Column(
+                                mainAxisAlignment:
+                                MainAxisAlignment
+                                    .center,
+                                children: [
+                                  Container(
+                                    width: 25,
+                                    height: 25,
+                                    alignment:
+                                    Alignment
+                                        .center,
+                                    decoration:
+                                    BoxDecoration(
+                                      color: isTodayValue
+                                          ? const Color(
+                                        0xFF1976D2,
+                                      )
+                                          : Colors
+                                          .transparent,
+                                      shape: BoxShape
+                                          .circle,
+                                    ),
+                                    child: Text(
+                                      '${date.day}',
+                                      style:
+                                      TextStyle(
+                                        fontWeight:
+                                        FontWeight
+                                            .bold,
+                                        fontSize:
+                                        13,
+                                        color: isTodayValue
+                                            ? Colors
+                                            .white
+                                            : isPast
+                                            ? Colors
+                                            .grey
+                                            : isClosed
+                                            ? Colors.red
+                                            : isFull
+                                            ? Colors
+                                            .orange
+                                            : Colors
+                                            .black,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    height: 4,
+                                  ),
+                                  Container(
+                                    constraints:
+                                    const BoxConstraints(
+                                      minWidth: 30,
+                                      maxWidth: 42,
+                                    ),
+                                    padding:
+                                    const EdgeInsets
+                                        .symmetric(
+                                      horizontal: 4,
+                                      vertical: 2,
+                                    ),
+                                    decoration:
+                                    BoxDecoration(
+                                      color: isPast
+                                          ? Colors
+                                          .grey
+                                          .shade300
+                                          : isClosed
+                                          ? Colors
+                                          .red
+                                          .shade100
+                                          : isFull
+                                          ? Colors
+                                          .orange
+                                          .shade100
+                                          : const Color(
+                                        0xFFD7E5FA,
+                                      ),
+                                      borderRadius:
+                                      BorderRadius
+                                          .circular(
+                                        7,
+                                      ),
+                                    ),
+                                    child: FittedBox(
+                                      fit: BoxFit
+                                          .scaleDown,
+                                      child: Text(
+                                        isPast
+                                            ? 'Past'
+                                            : isClosed
+                                            ? 'Closed'
+                                            : isFull
+                                            ? 'Full'
+                                            : '$booked/$limit',
+                                        textAlign:
+                                        TextAlign
+                                            .center,
+                                        style:
+                                        TextStyle(
+                                          fontSize: 8,
+                                          fontWeight:
+                                          FontWeight
+                                              .bold,
+                                          color: isPast
+                                              ? Colors
+                                              .grey
+                                              .shade700
+                                              : isClosed
+                                              ? Colors
+                                              .red
+                                              : isFull
+                                              ? Colors
+                                              .orange
+                                              : const Color(
+                                            0xFF339BFF,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                        childCount: days.length,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
+
           if (isMonthRefreshing)
             const Positioned(
               top: 0,
@@ -1518,7 +2115,8 @@ class _AdminAppointmentCalendarPageState
               child: LinearProgressIndicator(
                 minHeight: 3,
                 color: Colors.white,
-                backgroundColor: Color(0xFFD7E5FA),
+                backgroundColor:
+                Color(0xFFD7E5FA),
               ),
             ),
         ],

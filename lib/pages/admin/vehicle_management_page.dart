@@ -42,6 +42,10 @@ class _VehicleManagementPageState
 
   bool hasHandledInitialVehicle = false;
 
+  String? highlightedVehicleId;
+
+  final Map<String, GlobalKey> vehicleCardKeys = {};
+
   final ScrollController scrollController = ScrollController();
   bool showBackToTop = false;
 
@@ -52,6 +56,16 @@ class _VehicleManagementPageState
   @override
   void initState() {
     super.initState();
+
+    final initialVehicleId =
+        widget.initialVehicleId
+            ?.trim() ??
+            '';
+
+    if (initialVehicleId.isNotEmpty) {
+      highlightedVehicleId =
+          initialVehicleId;
+    }
 
     final initialPlate =
         widget.initialPlateNumber
@@ -205,17 +219,13 @@ class _VehicleManagementPageState
 
     Map<String, dynamic>? targetVehicle;
 
-    /*
-   * First use vehicle_id because it is unique
-   * and will not be affected if the plate is
-   * changed later.
-   */
     if (initialVehicleId.isNotEmpty) {
       for (final vehicle in vehicles) {
         final vehicleId =
-        vehicle['vehicle_id']
-            ?.toString()
-            .trim();
+            vehicle['vehicle_id']
+                ?.toString()
+                .trim() ??
+                '';
 
         if (vehicleId ==
             initialVehicleId) {
@@ -225,17 +235,15 @@ class _VehicleManagementPageState
       }
     }
 
-    /*
-   * Use the plate number only as a backup.
-   */
     if (targetVehicle == null &&
         initialPlateNumber.isNotEmpty) {
       for (final vehicle in vehicles) {
         final plateNumber =
-        vehicle['plate_number']
-            ?.toString()
-            .trim()
-            .toUpperCase();
+            vehicle['plate_number']
+                ?.toString()
+                .trim()
+                .toUpperCase() ??
+                '';
 
         if (plateNumber ==
             initialPlateNumber) {
@@ -252,8 +260,10 @@ class _VehicleManagementPageState
           .addPostFrameCallback((_) {
         if (!mounted) return;
 
-        showMessage(
-          'The selected vehicle could not be found.',
+        AppResultMessage.info(
+          context,
+          message:
+          'The related vehicle could not be found. It may have been deleted or changed.',
         );
       });
 
@@ -265,13 +275,95 @@ class _VehicleManagementPageState
       targetVehicle,
     );
 
+    final targetVehicleId =
+        vehicleToOpen['vehicle_id']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final targetStatus =
+        vehicleToOpen[
+        'verification_status']
+            ?.toString()
+            .trim() ??
+            'Verified';
+
+    searchController.clear();
+
+    setState(() {
+      searchText = '';
+
+      selectedVehicleColumn =
+      vehicleColumns.contains(
+        targetStatus,
+      )
+          ? targetStatus
+          : 'Verified';
+
+      highlightedVehicleId =
+          targetVehicleId;
+    });
+
     WidgetsBinding.instance
         .addPostFrameCallback((_) {
       if (!mounted) return;
 
-      showVehicleDetailDialog(
-        vehicleToOpen,
+      unawaited(
+        focusAndOpenInitialVehicle(
+          vehicleToOpen,
+        ),
       );
+    });
+  }
+
+  Future<void> focusAndOpenInitialVehicle(
+      Map<String, dynamic> vehicle,
+      ) async {
+    final vehicleId =
+        vehicle['vehicle_id']
+            ?.toString()
+            .trim() ??
+            '';
+
+    await Future<void>.delayed(
+      const Duration(milliseconds: 220),
+    );
+
+    if (!mounted) return;
+
+    final cardContext =
+        vehicleCardKeys[vehicleId]
+            ?.currentContext;
+
+    if (cardContext != null) {
+      await Scrollable.ensureVisible(
+        cardContext,
+        duration:
+        const Duration(milliseconds: 650),
+        curve: Curves.easeInOut,
+        alignment: 0.22,
+      );
+    }
+
+    await Future<void>.delayed(
+      const Duration(milliseconds: 180),
+    );
+
+    if (!mounted) return;
+
+    await showVehicleDetailDialog(
+      vehicle,
+      openedFromNotification: true,
+    );
+  }
+
+  void clearVehicleHighlight() {
+    if (highlightedVehicleId == null) {
+      return;
+    }
+
+    setState(() {
+      highlightedVehicleId = null;
     });
   }
 
@@ -1786,9 +1878,10 @@ class _VehicleManagementPageState
     );
   }
 
-  void showVehicleDetailDialog(
-      Map<String, dynamic> vehicle,
-      ) {
+  Future<void> showVehicleDetailDialog(
+      Map<String, dynamic> vehicle, {
+        bool openedFromNotification = false,
+      }) async {
     final status =
         vehicle['verification_status'] ??
             'Verified';
@@ -1817,7 +1910,7 @@ class _VehicleManagementPageState
     final imagesFuture =
     fetchVehicleImages(vehicleId);
 
-    showDialog(
+    await showDialog<void>(
       context: context,
       builder: (dialogContext) {
         return Dialog(
@@ -1878,6 +1971,56 @@ class _VehicleManagementPageState
                       ],
                     ),
                   ),
+
+                  if (openedFromNotification) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      width: double.infinity,
+                      padding:
+                      const EdgeInsets.all(13),
+                      decoration: BoxDecoration(
+                        color: const Color(
+                          0xFFEAF4FF,
+                        ),
+                        borderRadius:
+                        BorderRadius.circular(
+                          16,
+                        ),
+                        border: Border.all(
+                          color: const Color(
+                            0xFF339BFF,
+                          ).withOpacity(0.16),
+                        ),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons
+                                .notifications_active_outlined,
+                            color: Color(
+                              0xFF339BFF,
+                            ),
+                            size: 20,
+                          ),
+                          SizedBox(width: 9),
+                          Expanded(
+                            child: Text(
+                              'This is the vehicle claim linked to the notification you selected.',
+                              style: TextStyle(
+                                color: Color(
+                                  0xFF1F2937,
+                                ),
+                                fontSize: 11.5,
+                                height: 1.4,
+                                fontWeight:
+                                FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
 
                   const SizedBox(height: 18),
 
@@ -2226,6 +2369,10 @@ class _VehicleManagementPageState
         );
       },
     );
+    if (openedFromNotification &&
+        mounted) {
+      clearVehicleHighlight();
+    }
   }
 
   void showApproveClaimDialog(Map<String, dynamic> vehicle) {
@@ -2506,6 +2653,23 @@ class _VehicleManagementPageState
   }
 
   Widget buildVehicleCard(Map<String, dynamic> vehicle) {
+    final vehicleId =
+        vehicle['vehicle_id']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final isHighlighted =
+        vehicleId.isNotEmpty &&
+            highlightedVehicleId ==
+                vehicleId;
+
+    final cardKey =
+    vehicleCardKeys.putIfAbsent(
+      vehicleId,
+          () => GlobalKey(),
+    );
+
     final status = vehicle['verification_status']
         ?.toString()
         .trim() ??
@@ -2540,21 +2704,35 @@ class _VehicleManagementPageState
     final isPendingClaim = status == 'Pending Claim';
     final isVerified = status == 'Verified';
 
-    return Container(
+    return AnimatedContainer(
+      key: cardKey,
+      duration:
+      const Duration(milliseconds: 260),
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted
+            ? const Color(0xFFF5FAFF)
+            : Colors.white,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: statusColor.withOpacity(
+          color: isHighlighted
+              ? const Color(0xFF339BFF)
+              : statusColor.withOpacity(
             isPendingClaim ? 0.35 : 0.14,
           ),
-          width: isPendingClaim ? 1.4 : 1,
+          width: isHighlighted
+              ? 2.2
+              : isPendingClaim
+              ? 1.4
+              : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: statusColor.withOpacity(0.08),
-            blurRadius: 13,
+            color: isHighlighted
+                ? const Color(0xFF339BFF)
+                .withOpacity(0.18)
+                : statusColor.withOpacity(0.08),
+            blurRadius: isHighlighted ? 19 : 13,
             offset: const Offset(0, 5),
           ),
         ],
@@ -2579,6 +2757,56 @@ class _VehicleManagementPageState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (isHighlighted) ...[
+                    Container(
+                      width: double.infinity,
+                      margin:
+                      const EdgeInsets.only(
+                        bottom: 13,
+                      ),
+                      padding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 9,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(
+                          0xFFEAF4FF,
+                        ),
+                        borderRadius:
+                        BorderRadius.circular(
+                          14,
+                        ),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons
+                                .notifications_active_rounded,
+                            color: Color(
+                              0xFF339BFF,
+                            ),
+                            size: 18,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'VEHICLE CLAIM FROM NOTIFICATION',
+                              style: TextStyle(
+                                color: Color(
+                                  0xFF339BFF,
+                                ),
+                                fontSize: 10.5,
+                                fontWeight:
+                                FontWeight.bold,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -2895,6 +3123,7 @@ class _VehicleManagementPageState
 
           setState(() {
             selectedVehicleColumn = column;
+            highlightedVehicleId = null;
           });
 
           if (scrollController.hasClients) {
@@ -3133,6 +3362,7 @@ class _VehicleManagementPageState
                       onChanged: (value) {
                         setState(() {
                           searchText = value;
+                          highlightedVehicleId = null;
                         });
                       },
                       decoration: InputDecoration(
@@ -3230,16 +3460,92 @@ class _VehicleManagementPageState
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      'No $selectedVehicleColumn vehicle found.',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.black54,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                  child: Container(
+                    margin:
+                    const EdgeInsets.all(24),
+                    padding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 26,
+                      vertical: 34,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius:
+                      BorderRadius.circular(
+                        22,
                       ),
+                      border: Border.all(
+                        color: const Color(
+                          0xFF339BFF,
+                        ).withOpacity(0.10),
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize:
+                      MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 70,
+                          height: 70,
+                          decoration:
+                          BoxDecoration(
+                            color: const Color(
+                              0xFFEAF4FF,
+                            ),
+                            borderRadius:
+                            BorderRadius
+                                .circular(
+                              23,
+                            ),
+                          ),
+                          child: Icon(
+                            selectedVehicleColumn ==
+                                'Pending Claim'
+                                ? Icons
+                                .fact_check_outlined
+                                : Icons
+                                .directions_car_outlined,
+                            color: const Color(
+                              0xFF339BFF,
+                            ),
+                            size: 35,
+                          ),
+                        ),
+                        const SizedBox(
+                          height: 16,
+                        ),
+                        Text(
+                          'No $selectedVehicleColumn Vehicles',
+                          textAlign:
+                          TextAlign.center,
+                          style:
+                          const TextStyle(
+                            color: Color(
+                              0xFF1F2937,
+                            ),
+                            fontSize: 18,
+                            fontWeight:
+                            FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(
+                          height: 7,
+                        ),
+                        Text(
+                          searchText.trim().isEmpty
+                              ? 'Vehicles with this status will appear here.'
+                              : 'Try another plate number, model, or customer name.',
+                          textAlign:
+                          TextAlign.center,
+                          style:
+                          const TextStyle(
+                            color:
+                            Colors.black54,
+                            fontSize: 12.5,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

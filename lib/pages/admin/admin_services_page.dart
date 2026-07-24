@@ -522,114 +522,396 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
     );
   }
 
-  Widget buildServiceCard(Map<String, dynamic> service) {
-    final status = service['availability_status'] ?? 'Available';
-    final name = service['service_name'] ?? '';
-    final description = service['description'] ?? '';
+  Widget buildServiceInformationRow({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    final displayValue =
+    value.trim().isEmpty ? 'Not Provided' : value.trim();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: const Color(0xFF339BFF),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 2,
+          child: Text(
+            displayValue,
+            textAlign: TextAlign.right,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF1F2937),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget buildServiceCard(
+      Map<String, dynamic> service,
+      ) {
+    final status =
+        service['availability_status']
+            ?.toString()
+            .trim() ??
+            'Available';
+
+    final name =
+        service['service_name']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final description =
+        service['description']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final rawPrice =
+        double.tryParse(
+          service['price']?.toString() ?? '',
+        ) ??
+            0;
+
+    final statusColor =
+    getStatusColor(status);
 
     return Container(
-      height: 168,
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsets.only(
+        bottom: 16,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: statusColor.withOpacity(0.14),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.07),
-            blurRadius: 12,
+            color: statusColor.withOpacity(0.07),
+            blurRadius: 13,
             offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: () {
-          showServiceDialog(service: service);
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              const CircleAvatar(
-                radius: 28,
-                backgroundColor: Color(0xFFD7E5FA),
-                child: Icon(
-                  Icons.build,
-                  color: Color(0xFF339BFF),
-                  size: 29,
-                ),
+      child: Column(
+        children: [
+          InkWell(
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(22),
+              topRight: Radius.circular(22),
+            ),
+            onTap: () {
+              showServiceDialog(
+                service: service,
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                14,
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    autoFitText(
-                      name,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                      maxLines: 1,
-                    ),
-                    const SizedBox(height: 6),
-                    autoFitText(
-                      description.isEmpty
-                          ? 'No description provided'
-                          : description,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black54,
-                      maxLines: 1,
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.payments_outlined,
-                          size: 16,
-                          color: Colors.black45,
+              child: Column(
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 54,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          color:
+                          const Color(0xFFD7E5FA),
+                          borderRadius:
+                          BorderRadius.circular(17),
                         ),
-                        const SizedBox(width: 5),
-                        Text(
-                          'RM ${service['price']}',
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        child: const Icon(
+                          Icons.build_circle_outlined,
+                          color:
+                          Color(0xFF339BFF),
+                          size: 29,
+                        ),
+                      ),
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name.isEmpty
+                                  ? 'SERVICE NAME'
+                                  : name,
+                              maxLines: 2,
+                              overflow:
+                              TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color:
+                                Color(0xFF1F2937),
+                                fontSize: 18,
+                                fontWeight:
+                                FontWeight.bold,
+                                height: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 7),
+                            Container(
+                              padding:
+                              const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color:
+                                getStatusBackgroundColor(
+                                  status,
+                                ),
+                                borderRadius:
+                                BorderRadius.circular(
+                                  20,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize:
+                                MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    status == 'Available'
+                                        ? Icons
+                                        .check_circle_outline
+                                        : Icons
+                                        .cancel_outlined,
+                                    color: statusColor,
+                                    size: 13,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    status,
+                                    style: TextStyle(
+                                      color: statusColor,
+                                      fontSize: 10.5,
+                                      fontWeight:
+                                      FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: Colors.black38,
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.all(13),
+                    decoration: BoxDecoration(
+                      color:
+                      const Color(0xFFF7F9FC),
+                      borderRadius:
+                      BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      children: [
+                        buildServiceInformationRow(
+                          icon:
+                          Icons.description_outlined,
+                          title: 'Description',
+                          value: description.isEmpty
+                              ? 'No description provided'
+                              : description,
+                        ),
+                        const SizedBox(height: 11),
+                        const Divider(height: 1),
+                        const SizedBox(height: 11),
+                        buildServiceInformationRow(
+                          icon:
+                          Icons.payments_outlined,
+                          title: 'Price',
+                          value:
+                          'RM ${rawPrice.toStringAsFixed(2)}',
                         ),
                       ],
                     ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 6,
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Icon(
+                        status == 'Available'
+                            ? Icons
+                            .visibility_outlined
+                            : Icons
+                            .visibility_off_outlined,
+                        color: statusColor,
+                        size: 17,
                       ),
-                      decoration: BoxDecoration(
-                        color: getStatusBackgroundColor(status),
-                        borderRadius: BorderRadius.circular(20),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          status == 'Available'
+                              ? 'Customers can select this service.'
+                              : 'This service is hidden from customers.',
+                          style: TextStyle(
+                            color: statusColor,
+                            fontSize: 12,
+                            fontWeight:
+                            FontWeight.w600,
+                          ),
+                        ),
                       ),
-                      child: Text(
-                        status,
-                        style: TextStyle(
-                          color: getStatusColor(status),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11,
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              12,
+              11,
+              12,
+              12,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style:
+                    OutlinedButton.styleFrom(
+                      foregroundColor:
+                      const Color(
+                        0xFF339BFF,
+                      ),
+                      side: const BorderSide(
+                        color:
+                        Color(0xFF339BFF),
+                      ),
+                      shape:
+                      RoundedRectangleBorder(
+                        borderRadius:
+                        BorderRadius.circular(
+                          14,
                         ),
                       ),
                     ),
-                  ],
+                    onPressed: () {
+                      showServiceDialog(
+                        service: service,
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.edit_outlined,
+                      size: 18,
+                    ),
+                    label: const Text(
+                      'Edit Service',
+                      style: TextStyle(
+                        fontWeight:
+                        FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                onPressed: () {
-                  showDeleteServiceDialog(service['service_id'].toString());
-                },
-              ),
-            ],
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Container(
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color:
+                      getStatusBackgroundColor(
+                        status,
+                      ),
+                      borderRadius:
+                      BorderRadius.circular(14),
+                      border: Border.all(
+                        color: statusColor
+                            .withOpacity(0.22),
+                      ),
+                    ),
+                    child: Text(
+                      status == 'Available'
+                          ? 'Currently Available'
+                          : 'Currently Unavailable',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 11,
+                        fontWeight:
+                        FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                IconButton(
+                  tooltip: 'Delete Service',
+                  style: IconButton.styleFrom(
+                    backgroundColor:
+                    Colors.red.shade50,
+                    foregroundColor:
+                    Colors.red,
+                  ),
+                  onPressed: () {
+                    showDeleteServiceDialog(
+                      service['service_id']
+                          .toString(),
+                    );
+                  },
+                  icon: const Icon(
+                    Icons.delete_outline,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -1076,8 +1358,8 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
                                     );
                                   }
                                 },
-                                  child: Text(
-                                    isEdit ? '✓ Save Changes' : '+ Create Service',
+                                child: Text(
+                                  isEdit ? '✓ Save Changes' : '+ Create Service',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -1184,7 +1466,52 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
                 ),
               ),
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 16),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  12,
+                ),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Service List',
+                        style: TextStyle(
+                          color: Color(0xFF1F2937),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius:
+                        BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${services.length} service(s)',
+                        style: const TextStyle(
+                          color: Color(0xFF339BFF),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             if (isLoading)
               const SliverFillRemaining(
                 child: Center(child: CircularProgressIndicator()),

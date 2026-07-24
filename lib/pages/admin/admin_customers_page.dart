@@ -598,125 +598,778 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
     );
   }
 
-  void showCustomerDetails(Map<String, dynamic> customer) {
+  String getCustomerProfileImageUrl(
+      Map<String, dynamic> customer,
+      ) {
+    return customer['profile_image_url']
+        ?.toString()
+        .trim() ??
+        '';
+  }
+
+  Widget buildCustomerProfileImage({
+    required Map<String, dynamic> customer,
+    required double size,
+    double iconSize = 30,
+  }) {
+    final profileImageUrl =
+    getCustomerProfileImageUrl(customer);
+
+    if (profileImageUrl.isEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        color: const Color(0xFFD7E5FA),
+        alignment: Alignment.center,
+        child: Icon(
+          Icons.person,
+          color: const Color(0xFF339BFF),
+          size: iconSize,
+        ),
+      );
+    }
+
+    return Image.network(
+      profileImageUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (
+          context,
+          error,
+          stackTrace,
+          ) {
+        return Container(
+          width: size,
+          height: size,
+          color: const Color(0xFFD7E5FA),
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.person,
+            color: const Color(0xFF339BFF),
+            size: iconSize,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget buildCustomerAvatar({
+    required Map<String, dynamic> customer,
+    required double size,
+    double borderWidth = 3,
+    bool showShadow = true,
+  }) {
+    return Container(
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(borderWidth),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: const Color(0xFF339BFF)
+              .withOpacity(0.12),
+        ),
+        boxShadow: showShadow
+            ? [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 11,
+            offset: const Offset(0, 4),
+          ),
+        ]
+            : null,
+      ),
+      child: ClipOval(
+        child: buildCustomerProfileImage(
+          customer: customer,
+          size: size - (borderWidth * 2),
+          iconSize: size * 0.48,
+        ),
+      ),
+    );
+  }
+
+  void showCustomerProfilePicture(
+      Map<String, dynamic> customer,
+      ) {
+    final profileImageUrl =
+    getCustomerProfileImageUrl(customer);
+
+    final customerName =
+        customer['name']?.toString().trim() ??
+            'Customer';
+
+    if (profileImageUrl.isEmpty) {
+      showMessage(
+        'This customer has not added a profile picture.',
+      );
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) {
+        final screenSize =
+            MediaQuery.of(dialogContext).size;
+
+        final previewSize =
+        screenSize.width < 520
+            ? screenSize.width - 34
+            : 470.0;
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(17),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: previewSize,
+                constraints: BoxConstraints(
+                  maxHeight:
+                  screenSize.height * 0.78,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius:
+                  BorderRadius.circular(26),
+                  boxShadow: [
+                    BoxShadow(
+                      color:
+                      Colors.black.withOpacity(0.36),
+                      blurRadius: 28,
+                      offset:
+                      const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: InteractiveViewer(
+                    minScale: 1,
+                    maxScale: 4,
+                    child: Image.network(
+                      profileImageUrl,
+                      fit: BoxFit.contain,
+                      errorBuilder: (
+                          context,
+                          error,
+                          stackTrace,
+                          ) {
+                        return const Center(
+                          child: Icon(
+                            Icons
+                                .broken_image_outlined,
+                            color: Colors.white54,
+                            size: 72,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Material(
+                  color: Colors.black54,
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    tooltip: 'Close',
+                    onPressed: () {
+                      Navigator.pop(
+                        dialogContext,
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 18,
+                right: 18,
+                bottom: 18,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius:
+                    BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    customerName.isEmpty
+                        ? 'Pinch to zoom the profile picture'
+                        : '$customerName · Pinch to zoom',
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget buildCustomerDialogSection({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.035),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF4FF),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  size: 19,
+                  color: const Color(0xFF339BFF),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF1F2937),
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget buildCustomerDialogInformationRow({
+    required IconData icon,
+    required String title,
+    required String value,
+    bool showDivider = true,
+  }) {
+    final displayValue =
+    value.trim().isEmpty ? 'Not Provided' : value.trim();
+
+    return Column(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: Colors.black45,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 4,
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 6,
+              child: Text(
+                displayValue,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  color: Color(0xFF1F2937),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.bold,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (showDivider) ...[
+          const SizedBox(height: 11),
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+          const SizedBox(height: 11),
+        ],
+      ],
+    );
+  }
+
+  void showCustomerDetails(
+      Map<String, dynamic> customer,
+      ) {
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return FutureBuilder<List<Map<String, dynamic>>>(
           future: fetchCustomerVehicles(
             customer['customer_id'].toString(),
           ),
-          builder: (context, snapshot) {
-            final vehicles = snapshot.data ?? [];
+          builder: (dialogContext, snapshot) {
+            final vehicles =
+                snapshot.data ?? <Map<String, dynamic>>[];
 
-            return AlertDialog(
+            final customerName =
+                customer['name']?.toString().trim() ?? '';
+
+            final email =
+                customer['email']?.toString().trim() ?? '';
+
+            final phone =
+                customer['phone']?.toString().trim() ?? '';
+
+            final profileImageUrl =
+            getCustomerProfileImageUrl(
+              customer,
+            );
+
+            return Dialog(
               insetPadding: const EdgeInsets.symmetric(
-                horizontal: 18,
-                vertical: 35,
+                horizontal: 16,
+                vertical: 24,
               ),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(26),
               ),
-              title: Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Customer Details',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {
-                      showEditCustomerDialog(customer);
-                    },
-                    icon: const Icon(
-                      Icons.edit,
-                      color: Color(0xFF339BFF),
-                    ),
-                  ),
-                ],
-              ),
-              content: SizedBox(
-                width: 420,
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      buildDetailBox('Name', customer['name'] ?? ''),
-                      buildDetailBox('Email', customer['email'] ?? ''),
-                      buildDetailBox('Phone', customer['phone'] ?? ''),
-                      const SizedBox(height: 18),
-                      const Text(
-                        'Customer Vehicles',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+              clipBehavior: Clip.antiAlias,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 470,
+                  maxHeight:
+                  MediaQuery.of(dialogContext).size.height *
+                      0.88,
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(
+                        18,
+                        16,
+                        10,
+                        16,
+                      ),
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Color(0xFF248CF2),
+                            Color(0xFF63B3FF),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      if (snapshot.connectionState == ConnectionState.waiting)
-                        const Center(child: CircularProgressIndicator())
-                      else if (vehicles.isEmpty)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF5F7FA),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Text(
-                            'No vehicles assigned to this customer.',
-                            style: TextStyle(color: Colors.black54),
-                          ),
-                        )
-                      else
-                        Column(
-                          children: vehicles.map((vehicle) {
-                            return buildVehicleSmallCard(
-                              vehicle,
-                              onTap: () {
-                                openCustomerVehicle(
-                                  dialogContext: context,
-                                  vehicle: vehicle,
+                      child: Row(
+                        children: [
+                          Tooltip(
+                            message: profileImageUrl.isEmpty
+                                ? 'No profile picture'
+                                : 'View profile picture',
+                            child: GestureDetector(
+                              onTap: profileImageUrl.isEmpty
+                                  ? null
+                                  : () {
+                                showCustomerProfilePicture(
+                                  customer,
                                 );
                               },
-                            );
-                          }).toList(),
+                              child: buildCustomerAvatar(
+                                customer: customer,
+                                size: 58,
+                                borderWidth: 3,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 13),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  customerName.isEmpty
+                                      ? 'Customer Details'
+                                      : customerName,
+                                  maxLines: 1,
+                                  overflow:
+                                  TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 19,
+                                    fontWeight:
+                                    FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                const Text(
+                                  'Customer profile and linked vehicles',
+                                  maxLines: 1,
+                                  overflow:
+                                  TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12.5,
+                                    fontWeight:
+                                    FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Edit Customer',
+                            onPressed: () {
+                              showEditCustomerDialog(
+                                customer,
+                              );
+                            },
+                            icon: const Icon(
+                              Icons.edit_outlined,
+                              color: Colors.white,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: () {
+                              Navigator.pop(
+                                dialogContext,
+                              );
+                            },
+                            icon: const Icon(
+                              Icons.close,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            buildCustomerDialogSection(
+                              icon: Icons.badge_outlined,
+                              title: 'Customer Information',
+                              children: [
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(13),
+                                  margin: const EdgeInsets.only(
+                                    bottom: 13,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color:
+                                    const Color(0xFFF7F9FC),
+                                    borderRadius:
+                                    BorderRadius.circular(15),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      GestureDetector(
+                                        onTap:
+                                        profileImageUrl.isEmpty
+                                            ? null
+                                            : () {
+                                          showCustomerProfilePicture(
+                                            customer,
+                                          );
+                                        },
+                                        child: buildCustomerAvatar(
+                                          customer: customer,
+                                          size: 70,
+                                          borderWidth: 3,
+                                          showShadow: false,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 13),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                          CrossAxisAlignment
+                                              .start,
+                                          children: [
+                                            const Text(
+                                              'Profile Picture',
+                                              style: TextStyle(
+                                                color:
+                                                Color(0xFF1F2937),
+                                                fontSize: 13,
+                                                fontWeight:
+                                                FontWeight.bold,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              profileImageUrl.isEmpty
+                                                  ? 'Customer has not added a picture.'
+                                                  : 'Tap the picture to view it larger.',
+                                              style: const TextStyle(
+                                                color:
+                                                Colors.black54,
+                                                fontSize: 11.5,
+                                                height: 1.35,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (profileImageUrl.isNotEmpty)
+                                        IconButton(
+                                          tooltip:
+                                          'View Profile Picture',
+                                          onPressed: () {
+                                            showCustomerProfilePicture(
+                                              customer,
+                                            );
+                                          },
+                                          icon: const Icon(
+                                            Icons
+                                                .zoom_out_map_rounded,
+                                            color:
+                                            Color(0xFF339BFF),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                buildCustomerDialogInformationRow(
+                                  icon: Icons.person_outline,
+                                  title: 'Customer Name',
+                                  value: customerName,
+                                ),
+                                buildCustomerDialogInformationRow(
+                                  icon: Icons.email_outlined,
+                                  title: 'Email Address',
+                                  value: email,
+                                ),
+                                buildCustomerDialogInformationRow(
+                                  icon: Icons.phone_outlined,
+                                  title: 'Phone Number',
+                                  value: phone,
+                                  showDivider: false,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 13),
+                            buildCustomerDialogSection(
+                              icon: Icons.directions_car_outlined,
+                              title: 'Customer Vehicles',
+                              children: [
+                                if (snapshot.connectionState ==
+                                    ConnectionState.waiting)
+                                  const Padding(
+                                    padding: EdgeInsets.all(20),
+                                    child:
+                                    CircularProgressIndicator(),
+                                  )
+                                else if (vehicles.isEmpty)
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color:
+                                      const Color(0xFFF7F9FC),
+                                      borderRadius:
+                                      BorderRadius.circular(14),
+                                    ),
+                                    child: const Row(
+                                      children: [
+                                        Icon(
+                                          Icons.info_outline,
+                                          color:
+                                          Color(0xFF339BFF),
+                                          size: 20,
+                                        ),
+                                        SizedBox(width: 9),
+                                        Expanded(
+                                          child: Text(
+                                            'No vehicles are currently assigned to this customer.',
+                                            style: TextStyle(
+                                              color:
+                                              Colors.black54,
+                                              fontSize: 12.5,
+                                              height: 1.35,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  ...vehicles.map(
+                                        (vehicle) {
+                                      return buildVehicleSmallCard(
+                                        vehicle,
+                                        onTap: () {
+                                          openCustomerVehicle(
+                                            dialogContext:
+                                            dialogContext,
+                                            vehicle: vehicle,
+                                          );
+                                        },
+                                      );
+                                    },
+                                  ),
+                                const SizedBox(height: 4),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    style:
+                                    ElevatedButton.styleFrom(
+                                      backgroundColor:
+                                      const Color(
+                                        0xFF339BFF,
+                                      ),
+                                      foregroundColor:
+                                      Colors.white,
+                                      padding:
+                                      const EdgeInsets.symmetric(
+                                        vertical: 13,
+                                      ),
+                                      shape:
+                                      RoundedRectangleBorder(
+                                        borderRadius:
+                                        BorderRadius.circular(
+                                          14,
+                                        ),
+                                      ),
+                                    ),
+                                    onPressed: () {
+                                      showAddVehicleToCustomerDialog(
+                                        customer,
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.add,
+                                    ),
+                                    label: const Text(
+                                      'Add Vehicle',
+                                      style: TextStyle(
+                                        fontWeight:
+                                        FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                      const SizedBox(height: 18),
-                      SizedBox(
+                      ),
+                    ),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(
+                        16,
+                        12,
+                        16,
+                        16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        border: Border(
+                          top: BorderSide(
+                            color: Colors.grey.shade200,
+                          ),
+                        ),
+                      ),
+                      child: SizedBox(
                         width: double.infinity,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF339BFF),
-                            foregroundColor: Colors.white,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor:
+                            const Color(0xFF339BFF),
+                            side: const BorderSide(
+                              color: Color(0xFF339BFF),
+                            ),
+                            padding:
+                            const EdgeInsets.symmetric(
+                              vertical: 13,
+                            ),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius:
+                              BorderRadius.circular(14),
                             ),
                           ),
                           onPressed: () {
-                            showAddVehicleToCustomerDialog(customer);
+                            Navigator.pop(
+                              dialogContext,
+                            );
                           },
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add Vehicle'),
+                          icon: const Icon(
+                            Icons.check,
+                          ),
+                          label: const Text(
+                            'Done',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Close'),
-                ),
-              ],
             );
           },
         );
       },
     );
   }
+
   void showAddVehicleToCustomerDialog(Map<String, dynamic> customer) {
     final plateSearchController = TextEditingController();
     List<Map<String, dynamic>> vehicleResults = [];
@@ -1421,89 +2074,242 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
     );
   }
 
-  Widget buildCustomerCard(Map<String, dynamic> customer) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: () {
-        showCustomerDetails(customer);
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
+  Widget buildCustomerCard(
+      Map<String, dynamic> customer,
+      ) {
+    final name =
+        customer['name']?.toString().trim() ?? '';
+
+    final email =
+        customer['email']?.toString().trim() ?? '';
+
+    final phone =
+        customer['phone']?.toString().trim() ?? '';
+
+    final profileImageUrl =
+    getCustomerProfileImageUrl(customer);
+
+    return Container(
+      margin: const EdgeInsets.only(
+        bottom: 16,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: const Color(0xFF339BFF)
+              .withOpacity(0.10),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const CircleAvatar(
-              radius: 26,
-              backgroundColor: Color(0xFFD7E5FA),
-              child: Icon(
-                Icons.person,
-                color: Color(0xFF339BFF),
-                size: 28,
-              ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.055),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(22),
+              topRight: Radius.circular(22),
             ),
-            const SizedBox(width: 14),
-            Expanded(
+            onTap: () {
+              showCustomerDetails(customer);
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                14,
+              ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    customer['name'] ?? '',
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  buildInfoLine(
-                    icon: Icons.phone,
-                    text: customer['phone'] ?? '',
-                  ),
-                  const SizedBox(height: 5),
-                  buildInfoLine(
-                    icon: Icons.email,
-                    text: customer['email'] ?? '',
-                  ),
-                  const SizedBox(height: 12),
                   Row(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.green.shade50,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          'Registered',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11,
+                      Tooltip(
+                        message: profileImageUrl.isEmpty
+                            ? 'No profile picture'
+                            : 'View profile picture',
+                        child: GestureDetector(
+                          onTap: profileImageUrl.isEmpty
+                              ? null
+                              : () {
+                            showCustomerProfilePicture(
+                              customer,
+                            );
+                          },
+                          child: buildCustomerAvatar(
+                            customer: customer,
+                            size: 58,
+                            borderWidth: 3,
                           ),
                         ),
                       ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () {
-                          showDeleteCustomerDialog(customer);
-                        },
-                        icon: const Icon(
-                          Icons.delete,
-                          color: Colors.red,
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name.isEmpty
+                                  ? 'CUSTOMER NAME'
+                                  : name,
+                              maxLines: 2,
+                              overflow:
+                              TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color:
+                                Color(0xFF1F2937),
+                                fontSize: 18,
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Container(
+                              padding:
+                              const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color:
+                                Colors.green.shade50,
+                                borderRadius:
+                                BorderRadius.circular(
+                                  20,
+                                ),
+                              ),
+                              child: const Row(
+                                mainAxisSize:
+                                MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons
+                                        .verified_user_outlined,
+                                    color: Colors.green,
+                                    size: 13,
+                                  ),
+                                  SizedBox(width: 5),
+                                  Text(
+                                    'Registered Customer',
+                                    style: TextStyle(
+                                      color: Colors.green,
+                                      fontSize: 10.5,
+                                      fontWeight:
+                                      FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 7),
+                            Row(
+                              children: [
+                                Icon(
+                                  profileImageUrl.isEmpty
+                                      ? Icons
+                                      .no_photography_outlined
+                                      : Icons
+                                      .photo_camera_front_outlined,
+                                  color: profileImageUrl.isEmpty
+                                      ? Colors.black38
+                                      : const Color(
+                                    0xFF339BFF,
+                                  ),
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  profileImageUrl.isEmpty
+                                      ? 'No profile picture'
+                                      : 'Profile picture available',
+                                  style: TextStyle(
+                                    color:
+                                    profileImageUrl.isEmpty
+                                        ? Colors.black38
+                                        : const Color(
+                                      0xFF339BFF,
+                                    ),
+                                    fontSize: 10.5,
+                                    fontWeight:
+                                    FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: Colors.black38,
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.all(13),
+                    decoration: BoxDecoration(
+                      color:
+                      const Color(0xFFF7F9FC),
+                      borderRadius:
+                      BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      children: [
+                        buildCustomerCardInformationLine(
+                          icon:
+                          Icons.phone_outlined,
+                          title: 'Phone',
+                          value: phone,
+                        ),
+                        const SizedBox(height: 11),
+                        const Divider(height: 1),
+                        const SizedBox(height: 11),
+                        buildCustomerCardInformationLine(
+                          icon:
+                          Icons.email_outlined,
+                          title: 'Email',
+                          value: email,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  const Row(
+                    children: [
+                      Icon(
+                        Icons
+                            .directions_car_outlined,
+                        color: Color(0xFF339BFF),
+                        size: 17,
+                      ),
+                      SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          'Tap View Details to manage linked vehicles.',
+                          style: TextStyle(
+                            color: Colors.black54,
+                            fontSize: 12,
+                            fontWeight:
+                            FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
@@ -1511,9 +2317,167 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              12,
+              11,
+              12,
+              12,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style:
+                    OutlinedButton.styleFrom(
+                      foregroundColor:
+                      const Color(
+                        0xFF339BFF,
+                      ),
+                      side: const BorderSide(
+                        color:
+                        Color(0xFF339BFF),
+                      ),
+                      shape:
+                      RoundedRectangleBorder(
+                        borderRadius:
+                        BorderRadius.circular(
+                          14,
+                        ),
+                      ),
+                    ),
+                    onPressed: () {
+                      showCustomerDetails(
+                        customer,
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.visibility_outlined,
+                      size: 18,
+                    ),
+                    label: const Text(
+                      'View Details',
+                      style: TextStyle(
+                        fontWeight:
+                        FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style:
+                    ElevatedButton.styleFrom(
+                      backgroundColor:
+                      const Color(
+                        0xFF339BFF,
+                      ),
+                      foregroundColor:
+                      Colors.white,
+                      elevation: 0,
+                      shape:
+                      RoundedRectangleBorder(
+                        borderRadius:
+                        BorderRadius.circular(
+                          14,
+                        ),
+                      ),
+                    ),
+                    onPressed: () {
+                      showEditCustomerDialog(
+                        customer,
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.edit_outlined,
+                      size: 18,
+                    ),
+                    label: const Text(
+                      'Edit Customer',
+                      style: TextStyle(
+                        fontWeight:
+                        FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                IconButton(
+                  tooltip: 'Delete Customer',
+                  style: IconButton.styleFrom(
+                    backgroundColor:
+                    Colors.red.shade50,
+                    foregroundColor:
+                    Colors.red,
+                  ),
+                  onPressed: () {
+                    showDeleteCustomerDialog(
+                      customer,
+                    );
+                  },
+                  icon: const Icon(
+                    Icons.delete_outline,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget buildCustomerCardInformationLine({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    final displayValue =
+    value.trim().isEmpty ? 'Not Provided' : value.trim();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: const Color(0xFF339BFF),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 2,
+          child: Text(
+            displayValue,
+            textAlign: TextAlign.right,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF1F2937),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1655,6 +2619,49 @@ class _AdminCustomersPageState extends State<AdminCustomersPage> {
             ),
             const SliverToBoxAdapter(
               child: SizedBox(height: 16),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  12,
+                ),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Customer List',
+                        style: TextStyle(
+                          color: Color(0xFF1F2937),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius:
+                        BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${displayCustomers.length} customer(s)',
+                        style: const TextStyle(
+                          color: Color(0xFF339BFF),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
             if (displayCustomers.isEmpty)
               const SliverFillRemaining(

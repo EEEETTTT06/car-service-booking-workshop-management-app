@@ -899,52 +899,104 @@ class _MyVehiclesPageState extends State<MyVehiclesPage>
   }
 
   Future<void> notifyAdminsVehicleClaim({
+    required String vehicleId,
     required String plate,
     required String model,
   }) async {
     try {
-      final customerName = currentCustomer?['name'] ?? 'A customer';
+      final normalizedVehicleId =
+      vehicleId.trim();
 
-      const title = 'New Vehicle Claim Request';
+      final customerId =
+      currentCustomer?['customer_id']
+          ?.toString()
+          .trim();
+
+      if (normalizedVehicleId.isEmpty ||
+          customerId == null ||
+          customerId.isEmpty) {
+        debugPrint(
+          'Vehicle claim notification skipped because routing information is missing.',
+        );
+        return;
+      }
+
+      final customerName =
+          currentCustomer?['name'] ??
+              'A customer';
+
+      const title =
+          'New Vehicle Claim Request';
+
+      const notificationType =
+          'vehicle_claim';
+
+      const targetPage =
+          'vehicle_management';
+
       final body =
           '$customerName submitted a vehicle claim request for $plate - $model.';
 
       final admins = await supabase
           .from('admins')
-          .select('admin_id, notification_enabled');
+          .select(
+        'admin_id, notification_enabled',
+      );
 
       for (final admin in admins) {
-        await supabase.from('admin_notifications').insert({
+        await supabase
+            .from('admin_notifications')
+            .insert({
           'admin_id': admin['admin_id'],
           'title': title,
           'message': body,
           'is_read': false,
+          'notification_type':
+          notificationType,
+          'target_page': targetPage,
+          'vehicle_id':
+          normalizedVehicleId,
+          'customer_id': customerId,
         });
       }
 
-      final enabledAdminIds = admins
-          .where((admin) => admin['notification_enabled'] != false)
-          .map((admin) => admin['admin_id'])
-          .toList();
+      /*
+       * Admin device tokens are private and must
+       * not be selected by a Customer account.
+       * send-fcm now resolves enabled Admin tokens
+       * securely with the Service Role key.
+       */
+      final response =
+      await supabase.functions.invoke(
+        'send-fcm',
+        body: {
+          'audience': 'admins',
+          'title': title,
+          'body': body,
+          'data': {
+            'target_page': targetPage,
+            'notification_type':
+            notificationType,
+            'vehicle_id':
+            normalizedVehicleId,
+            'customer_id': customerId,
+          },
+        },
+      );
 
-      if (enabledAdminIds.isEmpty) return;
+      debugPrint(
+        'Admin Vehicle Claim FCM response: '
+            '${response.data}',
+      );
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Vehicle claim notify admin error: '
+            '$error',
+      );
 
-      final tokens = await supabase
-          .from('admin_fcm_tokens')
-          .select('fcm_token, admin_id')
-          .inFilter('admin_id', enabledAdminIds);
-
-      for (final row in tokens) {
-        final token = row['fcm_token'];
-        if (token == null || token.toString().isEmpty) continue;
-
-        await supabase.functions.invoke(
-          'send-fcm',
-          body: {'token': token, 'title': title, 'body': body},
-        );
-      }
-    } catch (error) {
-      debugPrint('Vehicle claim notify admin error: $error');
+      debugPrint(
+        stackTrace.toString(),
+      );
     }
   }
 
@@ -1029,6 +1081,7 @@ class _MyVehiclesPageState extends State<MyVehiclesPage>
 
       try {
         await notifyAdminsVehicleClaim(
+          vehicleId: vehicleId,
           plate:
           returnedPlate == null ||
               returnedPlate.isEmpty
@@ -1188,6 +1241,7 @@ class _MyVehiclesPageState extends State<MyVehiclesPage>
       if (verificationStatus == 'Pending Claim') {
         try {
           await notifyAdminsVehicleClaim(
+            vehicleId: returnedVehicleId,
             plate: returnedPlate == null ||
                 returnedPlate.isEmpty
                 ? upperPlate
@@ -3221,34 +3275,76 @@ class _MyVehiclesPageState extends State<MyVehiclesPage>
   }) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding:
+        const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95),
-          borderRadius: BorderRadius.circular(18),
+          color:
+          Colors.white.withOpacity(
+            0.97,
+          ),
+          borderRadius:
+          BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color:
+              Colors.black.withOpacity(
+                0.05,
+              ),
+              blurRadius: 9,
+              offset:
+              const Offset(0, 4),
+            ),
+          ],
         ),
         child: Row(
           children: [
-            CircleAvatar(
-              backgroundColor: const Color(0xFFD7E5FA),
-              child: Icon(icon, color: const Color(0xFF339BFF)),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color:
+                const Color(0xFFEAF4FF),
+                borderRadius:
+                BorderRadius.circular(
+                  13,
+                ),
+              ),
+              child: Icon(
+                icon,
+                color:
+                const Color(0xFF339BFF),
+                size: 22,
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 children: [
                   Text(
                     value,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
+                    style:
+                    const TextStyle(
+                      color:
+                      Color(0xFF1F2937),
+                      fontSize: 21,
+                      fontWeight:
+                      FontWeight.bold,
                     ),
                   ),
                   Text(
                     title,
-                    style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 12,
+                    maxLines: 1,
+                    overflow:
+                    TextOverflow.ellipsis,
+                    style:
+                    const TextStyle(
+                      color:
+                      Colors.black54,
+                      fontSize: 11.5,
+                      fontWeight:
+                      FontWeight.w600,
                     ),
                   ),
                 ],
@@ -3313,103 +3409,368 @@ class _MyVehiclesPageState extends State<MyVehiclesPage>
     );
   }
 
-  Widget buildVehicleCard(Map<String, dynamic> vehicle) {
-    final status = vehicle['verification_status'] ?? 'Pending Claim';
-    final booking = vehicleBookings[vehicle['vehicle_id'].toString()];
+  Widget buildVehicleCard(
+      Map<String, dynamic> vehicle,
+      ) {
+    final status =
+        vehicle['verification_status'] ??
+            'Pending Claim';
+
+    final displayStatus =
+    getDisplayStatus(
+      status.toString(),
+    );
+
+    final isLinked =
+        displayStatus == 'Link Record';
+
+    final vehicleId =
+        vehicle['vehicle_id']
+            ?.toString() ??
+            '';
+
+    final plateNumber =
+        vehicle['plate_number']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final carModel =
+        vehicle['car_model']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final booking =
+    vehicleBookings[vehicleId];
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin:
+      const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius:
+        BorderRadius.circular(22),
+        border: Border.all(
+          color: isLinked
+              ? Colors.green
+              .withOpacity(0.12)
+              : Colors.orange
+              .withOpacity(0.18),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color:
+            Colors.black.withOpacity(
+              0.06,
+            ),
+            blurRadius: 12,
+            offset:
+            const Offset(0, 5),
           ),
         ],
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius:
+        BorderRadius.circular(22),
         onTap: () {
-          showVehicleDetailDialog(vehicle);
+          showVehicleDetailDialog(
+            vehicle,
+          );
         },
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding:
+          const EdgeInsets.all(16),
           child: Column(
+            crossAxisAlignment:
+            CrossAxisAlignment.start,
             children: [
               Row(
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 children: [
-                  const CircleAvatar(
-                    radius: 26,
-                    backgroundColor: Color(0xFFD7E5FA),
-                    child: Icon(
-                      Icons.directions_car,
-                      color: Color(0xFF339BFF),
-                      size: 28,
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color:
+                      const Color(
+                        0xFFEAF4FF,
+                      ),
+                      borderRadius:
+                      BorderRadius.circular(
+                        18,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons
+                          .directions_car_rounded,
+                      color: Color(
+                        0xFF339BFF,
+                      ),
+                      size: 29,
                     ),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 13),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment:
+                      CrossAxisAlignment
+                          .start,
                       children: [
                         Text(
-                          '${vehicle['plate_number'] ?? ''} - ${vehicle['car_model'] ?? ''}',
+                          plateNumber.isEmpty
+                              ? 'Plate Not Provided'
+                              : plateNumber,
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                          overflow:
+                          TextOverflow
+                              .ellipsis,
+                          style:
+                          const TextStyle(
+                            color: Color(
+                              0xFF1F2937,
+                            ),
+                            fontSize: 18,
+                            fontWeight:
+                            FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(
+                          height: 3,
+                        ),
+                        Text(
+                          carModel.isEmpty
+                              ? 'Model Not Provided'
+                              : carModel,
+                          maxLines: 1,
+                          overflow:
+                          TextOverflow
+                              .ellipsis,
+                          style:
+                          const TextStyle(
+                            color:
+                            Colors.black54,
+                            fontSize: 12.5,
+                            fontWeight:
+                            FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(
+                          height: 9,
+                        ),
                         Container(
-                          padding: const EdgeInsets.symmetric(
+                          padding:
+                          const EdgeInsets
+                              .symmetric(
                             horizontal: 10,
                             vertical: 6,
                           ),
-                          decoration: BoxDecoration(
-                            color: getStatusBackgroundColor(status),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            getDisplayStatus(status),
-                            style: TextStyle(
-                              color: getStatusColor(status),
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11,
+                          decoration:
+                          BoxDecoration(
+                            color:
+                            getStatusBackgroundColor(
+                              status.toString(),
+                            ),
+                            borderRadius:
+                            BorderRadius
+                                .circular(
+                              20,
                             ),
                           ),
+                          child: Row(
+                            mainAxisSize:
+                            MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isLinked
+                                    ? Icons
+                                    .verified_rounded
+                                    : Icons
+                                    .pending_actions_rounded,
+                                color:
+                                getStatusColor(
+                                  status.toString(),
+                                ),
+                                size: 14,
+                              ),
+                              const SizedBox(
+                                width: 5,
+                              ),
+                              Text(
+                                displayStatus,
+                                style:
+                                TextStyle(
+                                  color:
+                                  getStatusColor(
+                                    status.toString(),
+                                  ),
+                                  fontWeight:
+                                  FontWeight.bold,
+                                  fontSize: 10.5,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        buildAppointmentText(booking),
                       ],
                     ),
                   ),
                   const Icon(
-                    Icons.arrow_forward_ios,
-                    size: 15,
+                    Icons
+                        .chevron_right_rounded,
+                    size: 23,
                     color: Colors.black38,
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 13),
+              Container(
+                width: double.infinity,
+                padding:
+                const EdgeInsets.all(
+                  12,
+                ),
+                decoration: BoxDecoration(
+                  color: booking == null
+                      ? const Color(
+                    0xFFF7F9FC,
+                  )
+                      : const Color(
+                    0xFFEAF4FF,
+                  ),
+                  borderRadius:
+                  BorderRadius.circular(
+                    15,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      booking == null
+                          ? Icons
+                          .event_available_outlined
+                          : Icons
+                          .calendar_month_rounded,
+                      color: booking == null
+                          ? Colors.black45
+                          : const Color(
+                        0xFF339BFF,
+                      ),
+                      size: 19,
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child:
+                      buildAppointmentText(
+                        booking,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!isLinked) ...[
+                const SizedBox(height: 11),
+                Container(
+                  width: double.infinity,
+                  padding:
+                  const EdgeInsets.all(
+                    11,
+                  ),
+                  decoration:
+                  BoxDecoration(
+                    color:
+                    Colors.orange.shade50,
+                    borderRadius:
+                    BorderRadius.circular(
+                      14,
+                    ),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons
+                            .info_outline_rounded,
+                        color: Colors.orange,
+                        size: 18,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Admin verification is pending. Clear VOC and vehicle photos can help the review.',
+                          style: TextStyle(
+                            color:
+                            Color(0xFF374151),
+                            fontSize: 11,
+                            height: 1.35,
+                            fontWeight:
+                            FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 13),
               Row(
                 children: [
                   buildActionButton(
-                    icon: Icons.history,
-                    label: 'Service Record',
+                    icon:
+                    Icons.history_rounded,
+                    label:
+                    'Service Record',
                     onPressed: () {
-                      goToServiceRecords(vehicle['plate_number'] ?? '');
+                      goToServiceRecords(
+                        plateNumber,
+                      );
                     },
                   ),
                   const SizedBox(width: 10),
                   buildActionButton(
-                    icon: Icons.calendar_month,
+                    icon: Icons
+                        .calendar_month_rounded,
                     label: 'Book Service',
-                    onPressed: goToBookingPage,
+                    onPressed:
+                    goToBookingPage,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 11),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.touch_app_outlined,
+                    color:
+                    Color(0xFF339BFF),
+                    size: 17,
+                  ),
+                  const SizedBox(width: 7),
+                  const Expanded(
+                    child: Text(
+                      'Tap the card to view vehicle details and photos',
+                      style: TextStyle(
+                        color: Colors.black45,
+                        fontSize: 10.5,
+                        fontWeight:
+                        FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    isLinked
+                        ? 'Verified'
+                        : 'Reviewing',
+                    style: TextStyle(
+                      color: isLinked
+                          ? Colors.green
+                          : Colors.orange,
+                      fontSize: 10.5,
+                      fontWeight:
+                      FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
@@ -3510,6 +3871,42 @@ class _MyVehiclesPageState extends State<MyVehiclesPage>
                       ],
                     ),
 
+                    const SizedBox(height: 14),
+
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.16),
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: const Row(
+                        crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons
+                                .verified_user_outlined,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          SizedBox(width: 9),
+                          Expanded(
+                            child: Text(
+                              'Pending Claim means the admin is reviewing the vehicle. Link Record means the vehicle has been verified and linked to your account.',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11.5,
+                                height: 1.4,
+                                fontWeight:
+                                FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
                     const SizedBox(height: 16),
 
                     TextField(
@@ -3551,13 +3948,135 @@ class _MyVehiclesPageState extends State<MyVehiclesPage>
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: Center(
-                  child: Text(
-                    searchText.trim().isEmpty
-                        ? 'No vehicles added yet.'
-                        : 'No matching vehicles found.',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: Colors.black54,
+                  child: Container(
+                    margin:
+                    const EdgeInsets.all(24),
+                    padding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 26,
+                      vertical: 34,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius:
+                      BorderRadius.circular(
+                        22,
+                      ),
+                      border: Border.all(
+                        color: const Color(
+                          0xFF339BFF,
+                        ).withOpacity(0.10),
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize:
+                      MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 72,
+                          height: 72,
+                          decoration:
+                          BoxDecoration(
+                            color: const Color(
+                              0xFFEAF4FF,
+                            ),
+                            borderRadius:
+                            BorderRadius
+                                .circular(
+                              24,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons
+                                .directions_car_outlined,
+                            color: Color(
+                              0xFF339BFF,
+                            ),
+                            size: 37,
+                          ),
+                        ),
+                        const SizedBox(
+                          height: 16,
+                        ),
+                        Text(
+                          searchText.trim().isEmpty
+                              ? 'No Vehicles Yet'
+                              : 'No Matching Vehicles',
+                          textAlign:
+                          TextAlign.center,
+                          style:
+                          const TextStyle(
+                            color: Color(
+                              0xFF1F2937,
+                            ),
+                            fontSize: 18,
+                            fontWeight:
+                            FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(
+                          height: 7,
+                        ),
+                        Text(
+                          searchText.trim().isEmpty
+                              ? 'Add your first vehicle to manage photos, service records, and appointments.'
+                              : 'Try another plate number, model, or claim status.',
+                          textAlign:
+                          TextAlign.center,
+                          style:
+                          const TextStyle(
+                            color:
+                            Colors.black54,
+                            fontSize: 12.5,
+                            height: 1.4,
+                          ),
+                        ),
+                        if (searchText
+                            .trim()
+                            .isEmpty) ...[
+                          const SizedBox(
+                            height: 17,
+                          ),
+                          ElevatedButton.icon(
+                            style:
+                            ElevatedButton
+                                .styleFrom(
+                              backgroundColor:
+                              const Color(
+                                0xFF339BFF,
+                              ),
+                              foregroundColor:
+                              Colors.white,
+                              padding:
+                              const EdgeInsets
+                                  .symmetric(
+                                horizontal: 18,
+                                vertical: 12,
+                              ),
+                              shape:
+                              RoundedRectangleBorder(
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                  14,
+                                ),
+                              ),
+                            ),
+                            onPressed:
+                            showAddVehicleDialog,
+                            icon: const Icon(
+                              Icons.add_rounded,
+                            ),
+                            label: const Text(
+                              'Add First Vehicle',
+                              style: TextStyle(
+                                fontWeight:
+                                FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),

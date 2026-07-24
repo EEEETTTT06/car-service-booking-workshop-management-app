@@ -638,19 +638,42 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     required IconData icon,
     required String title,
     required String value,
+    Color color = const Color(0xFF339BFF),
   }) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95),
-          borderRadius: BorderRadius.circular(18),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(17),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.45),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Row(
           children: [
-            CircleAvatar(
-              backgroundColor: const Color(0xFFD7E5FA),
-              child: Icon(icon, color: const Color(0xFF339BFF)),
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                icon,
+                color: color,
+                size: 21,
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -660,15 +683,19 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
                   Text(
                     value,
                     style: const TextStyle(
-                      fontSize: 22,
+                      color: Color(0xFF1F2937),
+                      fontSize: 20,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   Text(
                     title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.black54,
-                      fontSize: 12,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -679,6 +706,8 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
       ),
     );
   }
+
+
 
   Widget buildInfoLine({
     required IconData icon,
@@ -705,7 +734,26 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     final vehicle = record['vehicles'] ?? {};
     final customer = record['customers'] ?? {};
     final items = record['service_record_items'] as List? ?? [];
-    final status = record['status'] ?? 'Completed';
+
+    final status =
+    record['status']?.toString().trim().isNotEmpty == true
+        ? record['status'].toString()
+        : 'Completed';
+
+    final plateNumber =
+    vehicle['plate_number']?.toString().trim().isNotEmpty == true
+        ? vehicle['plate_number'].toString()
+        : 'No Plate Number';
+
+    final carModel =
+    vehicle['car_model']?.toString().trim().isNotEmpty == true
+        ? vehicle['car_model'].toString()
+        : 'Car Model Not Provided';
+
+    final problem =
+    record['problem_description']?.toString().trim().isNotEmpty == true
+        ? record['problem_description'].toString()
+        : 'No problem description provided.';
 
     final storedTotal =
         double.tryParse(record['total_price'].toString()) ?? 0;
@@ -717,9 +765,12 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: const Color(0xFF339BFF).withOpacity(0.08),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.07),
+            color: Colors.black.withOpacity(0.055),
             blurRadius: 12,
             offset: const Offset(0, 5),
           ),
@@ -730,86 +781,183 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
         onTap: () => showBillDetailDialog(record),
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const CircleAvatar(
-                radius: 26,
-                backgroundColor: Color(0xFFD7E5FA),
-                child: Icon(
-                  Icons.assignment,
-                  color: Color(0xFF339BFF),
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${vehicle['plate_number'] ?? ''} - ${vehicle['car_model'] ?? ''}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEAF4FF),
+                      borderRadius: BorderRadius.circular(15),
                     ),
-                    const SizedBox(height: 6),
-                    buildInfoLine(
-                      icon: Icons.person,
-                      text: 'Customer: ${displayCustomer(customer['name'])}',
+                    child: const Icon(
+                      Icons.car_repair_outlined,
+                      color: Color(0xFF339BFF),
+                      size: 25,
                     ),
-                    const SizedBox(height: 5),
-                    buildInfoLine(
-                      icon: Icons.event,
-                      text: 'Date: ${formatDate(record['created_at'])}',
-                    ),
-                    const SizedBox(height: 5),
-                    buildInfoLine(
-                      icon: Icons.build,
-                      text:
-                      'Problem: ${record['problem_description'] ?? 'No description'}',
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'RM ${total.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        color: Color(0xFF339BFF),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: getStatusBackgroundColor(status),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            status,
-                            style: TextStyle(
-                              color: getStatusColor(status),
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11,
-                            ),
+                        Text(
+                          plateNumber,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF1F2937),
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const Spacer(),
-                        const Icon(
-                          Icons.arrow_forward_ios,
-                          size: 15,
-                          color: Colors.black38,
+                        const SizedBox(height: 3),
+                        Text(
+                          carModel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.black54,
+                            fontSize: 12.5,
+                          ),
                         ),
                       ],
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: getStatusBackgroundColor(status),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      status.toUpperCase(),
+                      style: TextStyle(
+                        color: getStatusColor(status),
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 13),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7F9FC),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  children: [
+                    buildInfoLine(
+                      icon: Icons.person_outline,
+                      text:
+                      'Customer: ${displayCustomer(customer['name'])}',
+                    ),
+                    const SizedBox(height: 7),
+                    buildInfoLine(
+                      icon: Icons.event_outlined,
+                      text: 'Service Date: ${formatDate(record['created_at'])}',
+                    ),
+                    const SizedBox(height: 7),
+                    buildInfoLine(
+                      icon: Icons.handyman_outlined,
+                      text:
+                      '${items.length} service item${items.length == 1 ? '' : 's'}',
+                    ),
                   ],
                 ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Problem Description',
+                style: TextStyle(
+                  color: Colors.black45,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                problem,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF374151),
+                  fontSize: 12.5,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'TOTAL AMOUNT',
+                        style: TextStyle(
+                          color: Colors.black45,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'RM ${total.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Color(0xFF339BFF),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEAF4FF),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'View Details',
+                          style: TextStyle(
+                            color: Color(0xFF339BFF),
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Icon(
+                          Icons.arrow_forward_ios_rounded,
+                          color: Color(0xFF339BFF),
+                          size: 12,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -817,6 +965,8 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
       ),
     );
   }
+
+
 
   Widget buildInputBox({
     required TextEditingController controller,
@@ -1812,75 +1962,423 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
     priceController.dispose();
   }
 
-  void showAddRecordSourceDialog() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(18),
-          decoration: const BoxDecoration(
-            color: Color(0xFFD7E5FA),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+  bool get hasActiveRecordFilter {
+    return searchController.text.trim().isNotEmpty ||
+        selectedModel != 'All Car Model';
+  }
+
+  void clearRecordFilters() {
+    searchController.clear();
+
+    setState(() {
+      selectedModel = 'All Car Model';
+    });
+  }
+
+  Widget buildRecordsFilterPanel(int resultCount) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(21),
+        border: Border.all(
+          color: const Color(0xFF339BFF).withOpacity(0.09),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.045),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          TextField(
+            controller: searchController,
+            onChanged: (_) => setState(() {}),
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Search by plate number',
+              hintStyle: const TextStyle(
+                color: Colors.black38,
+                fontSize: 13,
+              ),
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+                color: Color(0xFF339BFF),
+              ),
+              suffixIcon: searchController.text.isNotEmpty
+                  ? IconButton(
+                tooltip: 'Clear Search',
+                onPressed: () {
+                  searchController.clear();
+                  setState(() {});
+                },
+                icon: const Icon(Icons.close_rounded),
+              )
+                  : null,
+              filled: true,
+              fillColor: const Color(0xFFF5F7FA),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 13,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+          const SizedBox(height: 11),
+          DropdownButtonFormField<String>(
+            value: selectedModel,
+            isExpanded: true,
+            icon: const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: Color(0xFF339BFF),
+            ),
+            decoration: InputDecoration(
+              labelText: 'Car Model',
+              labelStyle: const TextStyle(
+                color: Colors.black54,
+                fontSize: 12,
+              ),
+              prefixIcon: const Icon(
+                Icons.directions_car_outlined,
+                color: Color(0xFF339BFF),
+              ),
+              filled: true,
+              fillColor: const Color(0xFFF5F7FA),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 13,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            items: carModels.map((model) {
+              return DropdownMenuItem<String>(
+                value: model,
+                child: Text(
+                  model,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            }).toList(),
+            onChanged: (value) {
+              if (value == null) return;
+
+              setState(() {
+                selectedModel = value;
+              });
+            },
+          ),
+          const SizedBox(height: 11),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF4FF),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '$resultCount record${resultCount == 1 ? '' : 's'} shown',
+                  style: const TextStyle(
+                    color: Color(0xFF339BFF),
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              if (hasActiveRecordFilter)
+                TextButton.icon(
+                  onPressed: clearRecordFilters,
+                  icon: const Icon(
+                    Icons.filter_alt_off_outlined,
+                    size: 17,
+                  ),
+                  label: const Text('Reset'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildRecordsEmptyState() {
+    final filtered = hasActiveRecordFilter;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      child: Center(
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 34,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(23),
+            border: Border.all(
+              color: const Color(0xFF339BFF).withOpacity(0.08),
+            ),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Create Service Record',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF4FF),
+                  borderRadius: BorderRadius.circular(23),
+                ),
+                child: Icon(
+                  filtered
+                      ? Icons.search_off_rounded
+                      : Icons.assignment_outlined,
+                  color: const Color(0xFF339BFF),
+                  size: 36,
                 ),
               ),
               const SizedBox(height: 16),
-              ListTile(
-                tileColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
+              Text(
+                filtered
+                    ? 'No Matching Records'
+                    : 'No Service Records Yet',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF1F2937),
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                 ),
-                leading: const CircleAvatar(
-                  backgroundColor: Color(0xFFD7E5FA),
-                  child: Icon(Icons.edit_note, color: Color(0xFF339BFF)),
-                ),
-                title: const Text(
-                  'Manual Service Record',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: const Text('Create record for walk-in or old service.'),
-                onTap: () {
-                  Navigator.pop(context);
-                  showManualRecordDialog();
-                },
               ),
-              const SizedBox(height: 12),
-              ListTile(
-                tileColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
+              const SizedBox(height: 7),
+              Text(
+                filtered
+                    ? 'Try another plate number or change the car model filter.'
+                    : 'Completed vehicle service records will appear here.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12.5,
+                  height: 1.4,
                 ),
-                leading: const CircleAvatar(
-                  backgroundColor: Color(0xFFD7E5FA),
-                  child: Icon(Icons.car_repair, color: Color(0xFF339BFF)),
-                ),
-                title: const Text(
-                  'From Completed Pending Service',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: const Text(
-                  'Create record only after service status is completed.',
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  showCompletedPendingServiceDialog();
-                },
               ),
+              const SizedBox(height: 18),
+              if (filtered)
+                OutlinedButton.icon(
+                  onPressed: clearRecordFilters,
+                  icon: const Icon(Icons.restart_alt_rounded),
+                  label: const Text('Reset Filters'),
+                )
+              else
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF339BFF),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: showAddRecordSourceDialog,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Create First Record'),
+                ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget buildRecordSourceOption({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(19),
+        border: Border.all(
+          color: color.withOpacity(0.12),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 8,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(19),
+        ),
+        onTap: onTap,
+        leading: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.11),
+            borderRadius: BorderRadius.circular(15),
+          ),
+          child: Icon(
+            icon,
+            color: color,
+            size: 24,
+          ),
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF1F2937),
+            fontSize: 14.5,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            subtitle,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 11.5,
+              height: 1.35,
+            ),
+          ),
+        ),
+        trailing: Icon(
+          Icons.chevron_right_rounded,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  void showAddRecordSourceDialog() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(18, 10, 18, 22),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(28),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 44,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.black12,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEAF4FF),
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: const Icon(
+                        Icons.note_add_outlined,
+                        color: Color(0xFF339BFF),
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Create Service Record',
+                            style: TextStyle(
+                              color: Color(0xFF1F2937),
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: 3),
+                          Text(
+                            'Select how the record should be created.',
+                            style: TextStyle(
+                              color: Colors.black54,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.pop(sheetContext),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                buildRecordSourceOption(
+                  icon: Icons.edit_note_rounded,
+                  title: 'Manual Service Record',
+                  subtitle:
+                  'Create a record for a walk-in customer or a previous service.',
+                  color: const Color(0xFF339BFF),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    showManualRecordDialog();
+                  },
+                ),
+                buildRecordSourceOption(
+                  icon: Icons.car_repair_rounded,
+                  title: 'Completed Pending Service',
+                  subtitle:
+                  'Create a record from a service workflow that is already completed.',
+                  color: Colors.green,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    showCompletedPendingServiceDialog();
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
     );
   }
+
+
 
   Future<void> createRecordFromPendingService(
       Map<String, dynamic> pendingService,
@@ -1976,54 +2474,154 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
   void showCompletedPendingServiceDialog() {
     Map<String, dynamic>? selectedPendingService;
 
-    showDialog(
+    showDialog<void>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
+        final screenHeight = MediaQuery.of(dialogContext).size.height;
+
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (dialogContext, setDialogState) {
             return Dialog(
               insetPadding: const EdgeInsets.symmetric(
-                horizontal: 18,
-                vertical: 28,
+                horizontal: 16,
+                vertical: 24,
               ),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(26),
+                borderRadius: BorderRadius.circular(27),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(22),
+              clipBehavior: Clip.antiAlias,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 480,
+                  maxHeight: screenHeight * 0.82,
+                ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 22,
-                          backgroundColor: Color(0xFF339BFF),
-                          child: Icon(
-                            Icons.car_repair,
-                            color: Colors.white,
-                          ),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(18, 18, 10, 18),
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Color(0xFF339BFF),
+                            Color(0xFF63B3FF),
+                          ],
                         ),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'Completed Pending Service',
-                            style: TextStyle(
-                              fontSize: 19,
-                              fontWeight: FontWeight.bold,
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.18),
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            child: const Icon(
+                              Icons.car_repair_rounded,
+                              color: Colors.white,
+                              size: 25,
                             ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Completed Pending Service',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                SizedBox(height: 3),
+                                Text(
+                                  'Select one completed service to continue.',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 11.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.18),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              '${completedPendingServices.length}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: () => Navigator.pop(dialogContext),
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 320,
+                    Expanded(
                       child: completedPendingServices.isEmpty
-                          ? const Center(
-                        child: Text('No completed pending service found.'),
+                          ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(28),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 70,
+                                height: 70,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEAF4FF),
+                                  borderRadius: BorderRadius.circular(23),
+                                ),
+                                child: const Icon(
+                                  Icons.car_repair_outlined,
+                                  color: Color(0xFF339BFF),
+                                  size: 35,
+                                ),
+                              ),
+                              const SizedBox(height: 15),
+                              const Text(
+                                'No Completed Service Found',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Color(0xFF1F2937),
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              const Text(
+                                'A pending service must be completed before a record can be created from it.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.black54,
+                                  fontSize: 12,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       )
                           : ListView.builder(
+                        padding: const EdgeInsets.all(14),
                         itemCount: completedPendingServices.length,
                         itemBuilder: (context, index) {
                           final pending =
@@ -2037,65 +2635,134 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
                           final isSelected =
                               selectedPendingService == pending;
 
-                          return Card(
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            margin: const EdgeInsets.only(bottom: 11),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? const Color(0xFFEAF4FF)
+                                  : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                color: isSelected
+                                    ? const Color(0xFF339BFF)
+                                    : Colors.grey.shade200,
+                                width: isSelected ? 1.4 : 1,
+                              ),
+                            ),
                             child: ListTile(
-                              title: Text(
-                                '${vehicle['plate_number'] ?? ''} - ${vehicle['car_model'] ?? ''}',
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 13,
+                                vertical: 7,
                               ),
-                              subtitle: Text(
-                                'Customer: ${displayCustomer(customer['name'])}\n'
-                                    'Type: ${pending['service_type'] ?? 'Service'}\n'
-                                    'Total: RM ${total.toStringAsFixed(2)}',
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
                               ),
-                              trailing: isSelected
-                                  ? const Icon(
-                                Icons.check_circle,
-                                color: Colors.green,
-                              )
-                                  : null,
                               onTap: () {
                                 setDialogState(() {
                                   selectedPendingService = pending;
                                 });
                               },
+                              leading: Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? const Color(0xFF339BFF)
+                                      : const Color(0xFFEAF4FF),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: Icon(
+                                  Icons.directions_car_outlined,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : const Color(0xFF339BFF),
+                                ),
+                              ),
+                              title: Text(
+                                '${vehicle['plate_number'] ?? 'Not Provided'} - '
+                                    '${vehicle['car_model'] ?? 'Not Provided'}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF1F2937),
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Padding(
+                                padding: const EdgeInsets.only(top: 5),
+                                child: Text(
+                                  'Customer: ${displayCustomer(customer['name'])}\n'
+                                      '${pending['service_type'] ?? 'Service'}  •  RM ${total.toStringAsFixed(2)}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 11.5,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                              trailing: Icon(
+                                isSelected
+                                    ? Icons.check_circle_rounded
+                                    : Icons.radio_button_unchecked_rounded,
+                                color: isSelected
+                                    ? Colors.green
+                                    : Colors.black26,
+                              ),
                             ),
                           );
                         },
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('Cancel'),
-                          ),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        border: Border(
+                          top: BorderSide(color: Colors.grey.shade200),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF339BFF),
-                              foregroundColor: Colors.white,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(dialogContext),
+                              child: const Text('Cancel'),
                             ),
-                            onPressed: () async {
-                              if (selectedPendingService == null) {
-                                showMessage(
-                                  'Please select a completed pending service.',
-                                );
-                                return;
-                              }
-
-                              Navigator.pop(context);
-                              await createRecordFromPendingService(
-                                selectedPendingService!,
-                              );
-                            },
-                            child: const Text('Create Record'),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF339BFF),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 13),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              onPressed: selectedPendingService == null
+                                  ? null
+                                  : () async {
+                                final selected = selectedPendingService!;
+
+                                Navigator.pop(dialogContext);
+                                await createRecordFromPendingService(
+                                  selected,
+                                );
+                              },
+                              icon: const Icon(
+                                Icons.note_add_outlined,
+                                size: 19,
+                              ),
+                              label: const Text('Create Record'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -2106,6 +2773,8 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
       },
     );
   }
+
+
 
   void showBillDetailDialog(Map<String, dynamic> record) {
     final vehicle = record['vehicles'] ?? {};
@@ -2425,6 +3094,7 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     final displayRecords = filteredRecords;
 
@@ -2480,104 +3150,124 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Service History',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Create and view completed vehicle service records',
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
+                    const Row(
                       children: [
-                        buildSummaryCard(
-                          icon: Icons.assignment,
-                          title: 'Records',
-                          value: '${records.length}',
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Service History',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(height: 5),
+                              Text(
+                                'Completed vehicle maintenance and repair records.',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(width: 12),
-                        buildSummaryCard(
-                          icon: Icons.check_circle,
-                          title: 'Completed',
-                          value: '${getCompletedCount()}',
+                        Icon(
+                          Icons.history_rounded,
+                          color: Colors.white54,
+                          size: 34,
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: searchController,
-                      onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        hintText: 'Search by plate number',
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: searchController.text.isNotEmpty
-                            ? IconButton(
-                          onPressed: () {
-                            searchController.clear();
-                            setState(() {});
-                          },
-                          icon: const Icon(Icons.clear),
-                        )
-                            : null,
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: BorderSide.none,
+                    const SizedBox(height: 15),
+                    Row(
+                      children: [
+                        buildSummaryCard(
+                          icon: Icons.assignment_outlined,
+                          title: 'Total Records',
+                          value: '${records.length}',
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: selectedModel,
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.directions_car),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: BorderSide.none,
+                        const SizedBox(width: 11),
+                        buildSummaryCard(
+                          icon: Icons.check_circle_outline,
+                          title: 'Completed',
+                          value: '${getCompletedCount()}',
+                          color: Colors.green,
                         ),
-                      ),
-                      items: carModels.map((model) {
-                        return DropdownMenuItem(
-                          value: model,
-                          child: Text(model),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          selectedModel = value!;
-                        });
-                      },
+                      ],
                     ),
                   ],
                 ),
               ),
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            SliverToBoxAdapter(
+              child: buildRecordsFilterPanel(
+                displayRecords.length,
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Service Records',
+                            style: TextStyle(
+                              color: Color(0xFF1F2937),
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Tap a record to view the full service report.',
+                            style: TextStyle(
+                              color: Colors.black45,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh Records',
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF339BFF),
+                      ),
+                      onPressed: () {
+                        loadData();
+                      },
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             if (isLoading)
               const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (displayRecords.isEmpty)
-              const SliverFillRemaining(
+                hasScrollBody: false,
                 child: Center(
-                  child: Text(
-                    'No service records found.',
-                    style: TextStyle(fontSize: 16),
+                  child: CircularProgressIndicator(
+                    color: Color(0xFF339BFF),
                   ),
                 ),
               )
+            else if (displayRecords.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: buildRecordsEmptyState(),
+              )
             else
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                         (context, index) {
@@ -2601,19 +3291,28 @@ class _AdminRecordsPageState extends State<AdminRecordsPage> {
               foregroundColor: Colors.white,
               elevation: 4,
               onPressed: scrollToTop,
-              child: const Icon(Icons.keyboard_arrow_up),
+              child: const Icon(
+                Icons.keyboard_arrow_up,
+                color: Colors.white,
+              ),
             ),
           if (showBackToTop) const SizedBox(height: 12),
           FloatingActionButton.extended(
             heroTag: 'addRecord',
             backgroundColor: const Color(0xFF339BFF),
             foregroundColor: Colors.white,
+            elevation: 5,
             onPressed: showAddRecordSourceDialog,
-            icon: const Icon(Icons.add),
-            label: const Text('Add Record'),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text(
+              'Add Record',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
     );
   }
+
+
 }

@@ -10,10 +10,16 @@ import '../../services/customer_notification_service.dart';
 import '../common/app_result_message.dart';
 
 class AdminBookingsPage extends StatefulWidget {
-  const AdminBookingsPage({super.key});
+  final String? initialBookingId;
+
+  const AdminBookingsPage({
+    super.key,
+    this.initialBookingId,
+  });
 
   @override
-  State<AdminBookingsPage> createState() => _AdminBookingsPageState();
+  State<AdminBookingsPage> createState() =>
+      _AdminBookingsPageState();
 }
 
 class _AdminBookingsPageState extends State<AdminBookingsPage> {
@@ -21,7 +27,15 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
   String selectedSort = 'Nearest';
   String searchText = '';
   bool isLoading = false;
-  bool isProcessingDecision = false;
+
+  final TextEditingController searchController =
+  TextEditingController();
+
+  String? highlightedBookingId;
+  bool initialBookingHandled = false;
+
+  final Map<String, GlobalKey> bookingCardKeys = {};
+  bool isProcessingArrival = false;
 
   List<Map<String, dynamic>> bookings = [];
   final ScrollController scrollController = ScrollController();
@@ -34,6 +48,14 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
   @override
   void initState() {
     super.initState();
+
+    final initialBookingId =
+    widget.initialBookingId?.trim();
+
+    if (initialBookingId != null &&
+        initialBookingId.isNotEmpty) {
+      highlightedBookingId = initialBookingId;
+    }
 
     fetchBookings();
     setupRealtimeSubscription();
@@ -60,6 +82,7 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
       );
     }
 
+    searchController.dispose();
     scrollController.dispose();
     super.dispose();
   }
@@ -105,6 +128,8 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
           response,
         );
       });
+
+      scheduleInitialBookingFocus();
     } catch (error) {
       if (showLoading) {
         showMessage(
@@ -123,6 +148,131 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
       }
     }
   }
+  void scheduleInitialBookingFocus() {
+    final bookingId =
+    highlightedBookingId?.trim();
+
+    if (initialBookingHandled ||
+        bookingId == null ||
+        bookingId.isEmpty ||
+        bookings.isEmpty) {
+      return;
+    }
+
+    Map<String, dynamic>? matchedBooking;
+
+    for (final booking in bookings) {
+      if (booking['booking_id']
+          ?.toString()
+          .trim() ==
+          bookingId) {
+        matchedBooking = booking;
+        break;
+      }
+    }
+
+    if (matchedBooking == null) {
+      initialBookingHandled = true;
+
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        AppResultMessage.info(
+          context,
+          message:
+          'The related booking could not be found. It may have been deleted or changed.',
+        );
+      });
+
+      return;
+    }
+
+    final appointmentDate = parseBookingDate(
+      matchedBooking['appointment_date']
+          .toString(),
+    );
+
+    final bookingOnlyDate = DateTime(
+      appointmentDate.year,
+      appointmentDate.month,
+      appointmentDate.day,
+    );
+
+    final requiredFilter =
+    bookingOnlyDate.isBefore(today)
+        ? 'Past'
+        : bookingOnlyDate
+        .isAtSameMomentAs(today)
+        ? 'Today'
+        : 'Future';
+
+    searchController.clear();
+
+    setState(() {
+      selectedFilter = requiredFilter;
+      selectedSort = 'Nearest';
+      searchText = '';
+      highlightedBookingId = bookingId;
+    });
+
+    initialBookingHandled = true;
+
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) {
+      focusAndOpenBooking(
+        bookingId,
+        matchedBooking!,
+      );
+    });
+  }
+
+  Future<void> focusAndOpenBooking(
+      String bookingId,
+      Map<String, dynamic> booking,
+      ) async {
+    await Future<void>.delayed(
+      const Duration(milliseconds: 220),
+    );
+
+    if (!mounted) return;
+
+    final cardContext =
+        bookingCardKeys[bookingId]
+            ?.currentContext;
+
+    if (cardContext != null) {
+      await Scrollable.ensureVisible(
+        cardContext,
+        duration:
+        const Duration(milliseconds: 650),
+        curve: Curves.easeInOut,
+        alignment: 0.22,
+      );
+    }
+
+    await Future<void>.delayed(
+      const Duration(milliseconds: 220),
+    );
+
+    if (!mounted) return;
+
+    showBookingDetails(
+      booking,
+      openedFromNotification: true,
+    );
+  }
+
+  void clearBookingHighlight() {
+    if (highlightedBookingId == null) {
+      return;
+    }
+
+    setState(() {
+      highlightedBookingId = null;
+    });
+  }
+
   void setupRealtimeSubscription() {
     if (bookingsRealtimeChannel != null) {
       return;
@@ -443,33 +593,6 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
     return confirmed == true;
   }
 
-  Future<void> confirmApproveAppointment(
-      Map<String, dynamic> booking,
-      ) async {
-    final isRejected = booking['status'] == 'Rejected';
-    final vehicle = booking['vehicles'] ?? <String, dynamic>{};
-    final plate = vehicle['plate_number']?.toString().trim() ?? '';
-    final model = vehicle['car_model']?.toString().trim() ?? '';
-    final displayPlate = plate.isEmpty ? 'Not Provided' : plate;
-    final displayModel = model.isEmpty ? 'Not Provided' : model;
-
-    final confirmed = await showActionConfirmation(
-      title: isRejected ? 'Approve Again?' : 'Approve Appointment?',
-      message:
-      'Please check the vehicle before continuing.\n\n'
-          'Plate Number: $displayPlate\n'
-          'Car Model: $displayModel\n\n'
-          '${isRejected ? 'Approve this previously rejected appointment?' : 'Approve this appointment?'}',
-      confirmText: 'Approve $displayPlate',
-      confirmColor: Colors.green,
-      icon: Icons.check_circle_outline,
-    );
-
-    if (!confirmed) return;
-
-    await approveAppointment(booking);
-  }
-
   Future<void> confirmCustomerArrived(
       Map<String, dynamic> booking,
       ) async {
@@ -485,7 +608,7 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
       'Please physically check the plate number before continuing.\n\n'
           'Plate Number: $displayPlate\n'
           'Car Model: $displayModel\n\n'
-          'Mark this vehicle as Arrived and move it to Pending Services?',
+          'Confirm that this booked vehicle has arrived and move it to Pending Services?',
       confirmText: 'Arrived: $displayPlate',
       confirmColor: Colors.orange,
       icon: Icons.directions_car,
@@ -496,223 +619,11 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
     await markCustomerArrived(booking);
   }
 
-  Future<void> approveAppointment(
-      Map<String, dynamic> booking,
-      ) async {
-    if (isProcessingDecision) return;
-
-    final bookingId =
-    booking['booking_id']?.toString().trim();
-
-    if (bookingId == null || bookingId.isEmpty) {
-      showMessage('Booking information is missing.');
-      return;
-    }
-
-    if (mounted) {
-      setState(() {
-        isProcessingDecision = true;
-      });
-    }
-
-    try {
-      final rpcResult = await supabase.rpc(
-        'admin_decide_booking',
-        params: {
-          'p_booking_id': bookingId,
-          'p_decision': 'approve',
-          'p_rejection_reason': null,
-        },
-      );
-
-      if (rpcResult is! Map) {
-        throw Exception(
-          'Invalid booking decision result was returned.',
-        );
-      }
-
-      final result = Map<String, dynamic>.from(
-        rpcResult,
-      );
-
-      if (result['updated'] != true ||
-          result['status'] != 'Approved') {
-        throw Exception(
-          'The appointment was not approved correctly.',
-        );
-      }
-
-      final customerId =
-      result['customer_id']?.toString().trim();
-
-      final title =
-          result['title']?.toString() ??
-              'Appointment Approved';
-
-      final message =
-          result['message']?.toString() ??
-              'Your appointment has been approved.';
-
-      if (customerId != null && customerId.isNotEmpty) {
-        try {
-          await sendFcmPushNotification(
-            customerId: customerId,
-            title: title,
-            message: message,
-            data: {
-              'notification_type': 'booking',
-              'target_page': 'my_bookings',
-              'booking_id': result['booking_id'] ?? bookingId,
-              'vehicle_id':
-              result['vehicle_id'] ?? booking['vehicle_id'],
-            },
-          );
-        } catch (notificationError, stackTrace) {
-          debugPrint(
-            'Appointment approval push failed: '
-                '$notificationError',
-          );
-          debugPrint(stackTrace.toString());
-        }
-      }
-
-      await fetchBookings(showLoading: false);
-      showMessage('Appointment approved.');
-    } on PostgrestException catch (error) {
-      showMessage(error.message);
-      await fetchBookings(showLoading: false);
-    } catch (error, stackTrace) {
-      debugPrint(
-        'Admin approve appointment failed: $error',
-      );
-      debugPrint(stackTrace.toString());
-
-      showMessage(
-        'Failed to approve appointment: $error',
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          isProcessingDecision = false;
-        });
-      }
-    }
-  }
-
-  Future<void> rejectAppointment({
-    required Map<String, dynamic> booking,
-    required String reason,
-  }) async {
-    if (isProcessingDecision) return;
-
-    final bookingId =
-    booking['booking_id']?.toString().trim();
-
-    final normalizedReason = reason.trim();
-
-    if (bookingId == null || bookingId.isEmpty) {
-      showMessage('Booking information is missing.');
-      return;
-    }
-
-    if (normalizedReason.isEmpty) {
-      showMessage('Please enter rejection reason.');
-      return;
-    }
-
-    if (mounted) {
-      setState(() {
-        isProcessingDecision = true;
-      });
-    }
-
-    try {
-      final rpcResult = await supabase.rpc(
-        'admin_decide_booking',
-        params: {
-          'p_booking_id': bookingId,
-          'p_decision': 'reject',
-          'p_rejection_reason': normalizedReason,
-        },
-      );
-
-      if (rpcResult is! Map) {
-        throw Exception(
-          'Invalid booking decision result was returned.',
-        );
-      }
-
-      final result = Map<String, dynamic>.from(
-        rpcResult,
-      );
-
-      if (result['updated'] != true ||
-          result['status'] != 'Rejected') {
-        throw Exception(
-          'The appointment was not rejected correctly.',
-        );
-      }
-
-      final customerId =
-      result['customer_id']?.toString().trim();
-
-      final title =
-          result['title']?.toString() ??
-              'Appointment Rejected';
-
-      final message =
-          result['message']?.toString() ??
-              'Your appointment has been rejected.';
-
-      if (customerId != null && customerId.isNotEmpty) {
-        try {
-          await sendFcmPushNotification(
-            customerId: customerId,
-            title: title,
-            message: message,
-            data: {
-              'notification_type': 'booking',
-              'target_page': 'my_bookings',
-              'booking_id': result['booking_id'] ?? bookingId,
-              'vehicle_id':
-              result['vehicle_id'] ?? booking['vehicle_id'],
-            },
-          );
-        } catch (notificationError, stackTrace) {
-          debugPrint(
-            'Appointment rejection push failed: '
-                '$notificationError',
-          );
-          debugPrint(stackTrace.toString());
-        }
-      }
-
-      await fetchBookings(showLoading: false);
-      showMessage('Appointment rejected.');
-    } on PostgrestException catch (error) {
-      showMessage(error.message);
-      await fetchBookings(showLoading: false);
-    } catch (error, stackTrace) {
-      debugPrint(
-        'Admin reject appointment failed: $error',
-      );
-      debugPrint(stackTrace.toString());
-
-      showMessage(
-        'Failed to reject appointment: $error',
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          isProcessingDecision = false;
-        });
-      }
-    }
-  }
-
   Future<void> markCustomerArrived(
       Map<String, dynamic> booking,
       ) async {
+    if (isProcessingArrival) return;
+
     final bookingId =
     booking['booking_id']
         ?.toString()
@@ -724,6 +635,12 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
         'Booking information is missing.',
       );
       return;
+    }
+
+    if (mounted) {
+      setState(() {
+        isProcessingArrival = true;
+      });
     }
 
     try {
@@ -828,169 +745,638 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
       showMessage(
         'Failed to mark customer arrived: $error',
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isProcessingArrival = false;
+        });
+      }
     }
   }
 
-  void showRejectReasonDialog(Map<String, dynamic> booking) {
-    final reasonController = TextEditingController();
+  void showBookingDetails(
+      Map<String, dynamic> booking, {
+        bool openedFromNotification = false,
+      }) {
+    final customerName =
+        booking['customers']?['name']
+            ?.toString()
+            .trim() ??
+            'Not Provided';
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Reject Appointment'),
-          content: TextField(
-            controller: reasonController,
-            maxLines: 4,
-            decoration: InputDecoration(
-              hintText: 'Enter rejection reason',
-              filled: true,
-              fillColor: const Color(0xFFF5F7FA),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () async {
-                final reason = reasonController.text.trim();
+    final customerPhone =
+        booking['customers']?['phone']
+            ?.toString()
+            .trim() ??
+            'Not Provided';
 
-                if (reason.isEmpty) {
-                  showMessage('Please enter rejection reason.');
-                  return;
-                }
+    final customerEmail =
+        booking['customers']?['email']
+            ?.toString()
+            .trim() ??
+            'Not Provided';
 
-                Navigator.pop(context);
+    final vehiclePlate =
+        booking['vehicles']?['plate_number']
+            ?.toString()
+            .trim() ??
+            '';
 
-                final vehicle =
-                    booking['vehicles'] ?? <String, dynamic>{};
-                final plate =
-                    vehicle['plate_number']?.toString().trim() ?? '';
-                final model =
-                    vehicle['car_model']?.toString().trim() ?? '';
-                final displayPlate =
-                plate.isEmpty ? 'Not Provided' : plate;
-                final displayModel =
-                model.isEmpty ? 'Not Provided' : model;
+    final vehicleModel =
+        booking['vehicles']?['car_model']
+            ?.toString()
+            .trim() ??
+            '';
 
-                final confirmed = await showActionConfirmation(
-                  title: 'Reject Appointment?',
-                  message:
-                  'Please check the vehicle before continuing.\n\n'
-                      'Plate Number: $displayPlate\n'
-                      'Car Model: $displayModel\n\n'
-                      'Reason: $reason',
-                  confirmText: 'Reject $displayPlate',
-                  confirmColor: Colors.red,
-                  icon: Icons.cancel_outlined,
-                );
-
-                if (!confirmed) return;
-
-                await rejectAppointment(
-                  booking: booking,
-                  reason: reason,
-                );
-              },
-              child: const Text('Reject'),
-            ),
-          ],
-        );
-      },
+    final date = formatDate(
+      booking['appointment_date'].toString(),
     );
-  }
 
-  void showBookingDetails(Map<String, dynamic> booking) {
-    final customerName = booking['customers']?['name'] ?? 'Not Provided';
-    final customerPhone = booking['customers']?['phone'] ?? 'Not Provided';
-    final customerEmail = booking['customers']?['email'] ?? 'Not Provided';
-    final vehiclePlate = booking['vehicles']?['plate_number'] ?? '';
-    final vehicleModel = booking['vehicles']?['car_model'] ?? '';
-    final date = formatDate(booking['appointment_date'].toString());
-    final problem = booking['problem_description'] ?? 'No description';
+    final problem =
+        booking['problem_description']
+            ?.toString()
+            .trim() ??
+            '';
+
     final services = getServices(booking);
     final total = getTotalPrice(booking);
-    final status = booking['status'] ?? 'Booked';
-    final rejectionReason = booking['rejection_reason'];
 
-    showDialog(
+    final status =
+        booking['status']?.toString() ??
+            'Booked';
+
+    final rejectionReason =
+    booking['rejection_reason']
+        ?.toString()
+        .trim();
+
+    final statusColor =
+    getStatusColor(status);
+
+    showDialog<void>(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 35,
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 22,
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-          ),
-          title: const Text(
-            'Booking Details',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          content: SizedBox(
-            width: 430,
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  buildDetailRow('Customer', customerName),
-                  buildDetailRow('Phone', customerPhone),
-                  buildDetailRow('Email', customerEmail),
-                  buildDetailRow('Vehicle', '$vehiclePlate • $vehicleModel'),
-                  buildDetailRow('Date', date),
-                  buildDetailRow('Problem', problem),
-                  buildDetailRow('Status', status),
-                  if (rejectionReason != null &&
-                      rejectionReason.toString().isNotEmpty)
-                    buildDetailRow(
-                      'Reject Reason',
-                      rejectionReason.toString(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 480,
+              maxHeight:
+              MediaQuery.of(dialogContext)
+                  .size
+                  .height *
+                  0.9,
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color:
+                    Colors.black.withOpacity(
+                      0.18,
                     ),
-                  const SizedBox(height: 14),
-                  const Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Selected Services',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                    blurRadius: 30,
+                    offset:
+                    const Offset(0, 12),
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize:
+                MainAxisSize.min,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      18,
+                      17,
+                      10,
+                      17,
+                    ),
+                    decoration:
+                    const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Color(0xFF248CF2),
+                          Color(0xFF63B3FF),
+                        ],
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration:
+                          BoxDecoration(
+                            color: Colors.white
+                                .withOpacity(0.18),
+                            borderRadius:
+                            BorderRadius.circular(
+                              17,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons
+                                .event_note_rounded,
+                            color: Colors.white,
+                            size: 29,
+                          ),
+                        ),
+                        const SizedBox(width: 13),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+                            children: [
+                              const Text(
+                                'Booking Details',
+                                style: TextStyle(
+                                  color:
+                                  Colors.white,
+                                  fontSize: 19,
+                                  fontWeight:
+                                  FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(
+                                height: 4,
+                              ),
+                              Text(
+                                openedFromNotification
+                                    ? 'Opened from the related notification'
+                                    : '$vehiclePlate • $date',
+                                maxLines: 1,
+                                overflow:
+                                TextOverflow
+                                    .ellipsis,
+                                style:
+                                const TextStyle(
+                                  color:
+                                  Colors.white70,
+                                  fontSize: 11.5,
+                                  fontWeight:
+                                  FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () {
+                            Navigator.pop(
+                              dialogContext,
+                            );
+                          },
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child:
+                    SingleChildScrollView(
+                      padding:
+                      const EdgeInsets.all(
+                        17,
+                      ),
+                      child: Column(
+                        children: [
+                          if (openedFromNotification)
+                            Container(
+                              width: double.infinity,
+                              margin:
+                              const EdgeInsets
+                                  .only(
+                                bottom: 13,
+                              ),
+                              padding:
+                              const EdgeInsets
+                                  .all(
+                                13,
+                              ),
+                              decoration:
+                              BoxDecoration(
+                                color: const Color(
+                                  0xFFEAF4FF,
+                                ),
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                  16,
+                                ),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(
+                                    Icons
+                                        .notifications_active_outlined,
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                    size: 20,
+                                  ),
+                                  SizedBox(
+                                    width: 9,
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      'This is the booking linked to the notification you selected.',
+                                      style:
+                                      TextStyle(
+                                        color: Color(
+                                          0xFF1F2937,
+                                        ),
+                                        fontSize: 11.5,
+                                        fontWeight:
+                                        FontWeight
+                                            .w600,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          buildBookingDialogSection(
+                            icon:
+                            Icons.person_outline,
+                            title:
+                            'Customer Information',
+                            children: [
+                              buildBookingDialogRow(
+                                title: 'Customer',
+                                value:
+                                customerName,
+                              ),
+                              buildBookingDialogRow(
+                                title: 'Phone',
+                                value:
+                                customerPhone,
+                              ),
+                              buildBookingDialogRow(
+                                title: 'Email',
+                                value:
+                                customerEmail,
+                                showDivider:
+                                false,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(
+                            height: 13,
+                          ),
+                          buildBookingDialogSection(
+                            icon: Icons
+                                .directions_car_outlined,
+                            title:
+                            'Appointment Information',
+                            children: [
+                              buildBookingDialogRow(
+                                title: 'Vehicle',
+                                value:
+                                '$vehiclePlate • $vehicleModel',
+                              ),
+                              buildBookingDialogRow(
+                                title:
+                                'Appointment Date',
+                                value: date,
+                              ),
+                              Row(
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Status',
+                                      style:
+                                      TextStyle(
+                                        color:
+                                        Colors.black54,
+                                        fontSize: 12,
+                                        fontWeight:
+                                        FontWeight
+                                            .w600,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding:
+                                    const EdgeInsets
+                                        .symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration:
+                                    BoxDecoration(
+                                      color:
+                                      getStatusBackgroundColor(
+                                        status,
+                                      ),
+                                      borderRadius:
+                                      BorderRadius
+                                          .circular(
+                                        20,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      status,
+                                      style:
+                                      TextStyle(
+                                        color:
+                                        statusColor,
+                                        fontSize: 10.5,
+                                        fontWeight:
+                                        FontWeight
+                                            .bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          if (problem.isNotEmpty) ...[
+                            const SizedBox(
+                              height: 13,
+                            ),
+                            buildBookingDialogSection(
+                              icon: Icons
+                                  .description_outlined,
+                              title:
+                              'Problem / Notes',
+                              children: [
+                                Text(
+                                  problem,
+                                  style:
+                                  const TextStyle(
+                                    color: Color(
+                                      0xFF374151,
+                                    ),
+                                    fontSize: 13,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (rejectionReason !=
+                              null &&
+                              rejectionReason
+                                  .isNotEmpty) ...[
+                            const SizedBox(
+                              height: 13,
+                            ),
+                            Container(
+                              width: double.infinity,
+                              padding:
+                              const EdgeInsets
+                                  .all(
+                                14,
+                              ),
+                              decoration:
+                              BoxDecoration(
+                                color: Colors
+                                    .red.shade50,
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                  17,
+                                ),
+                                border: Border.all(
+                                  color: Colors.red
+                                      .withOpacity(
+                                    0.16,
+                                  ),
+                                ),
+                              ),
+                              child: Row(
+                                crossAxisAlignment:
+                                CrossAxisAlignment
+                                    .start,
+                                children: [
+                                  const Icon(
+                                    Icons
+                                        .cancel_outlined,
+                                    color:
+                                    Colors.red,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(
+                                    width: 9,
+                                  ),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                      CrossAxisAlignment
+                                          .start,
+                                      children: [
+                                        const Text(
+                                          'Rejection Reason',
+                                          style:
+                                          TextStyle(
+                                            color:
+                                            Colors.red,
+                                            fontSize:
+                                            12.5,
+                                            fontWeight:
+                                            FontWeight
+                                                .bold,
+                                          ),
+                                        ),
+                                        const SizedBox(
+                                          height: 5,
+                                        ),
+                                        Text(
+                                          rejectionReason,
+                                          style:
+                                          const TextStyle(
+                                            color:
+                                            Color(
+                                              0xFF7F1D1D,
+                                            ),
+                                            fontSize:
+                                            12,
+                                            height:
+                                            1.4,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          const SizedBox(
+                            height: 13,
+                          ),
+                          buildBookingDialogSection(
+                            icon:
+                            Icons.build_outlined,
+                            title:
+                            'Selected Services',
+                            children: [
+                              if (services.isEmpty)
+                                buildServiceItem(
+                                  'No service found',
+                                  0,
+                                )
+                              else
+                                ...services.map(
+                                      (service) {
+                                    final price =
+                                        double.tryParse(
+                                          service[
+                                          'price']
+                                              .toString(),
+                                        ) ??
+                                            0;
+
+                                    return buildServiceItem(
+                                      service[
+                                      'service_name']
+                                          ?.toString() ??
+                                          '',
+                                      price,
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
+                          const SizedBox(
+                            height: 13,
+                          ),
+                          Container(
+                            width: double.infinity,
+                            padding:
+                            const EdgeInsets
+                                .all(
+                              16,
+                            ),
+                            decoration:
+                            BoxDecoration(
+                              color: const Color(
+                                0xFFEAF4FF,
+                              ),
+                              borderRadius:
+                              BorderRadius
+                                  .circular(
+                                18,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                    'Estimated Total',
+                                    style:
+                                    TextStyle(
+                                      color:
+                                      Colors.black54,
+                                      fontSize: 13,
+                                      fontWeight:
+                                      FontWeight
+                                          .w600,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  'RM ${total.toStringAsFixed(2)}',
+                                  style:
+                                  const TextStyle(
+                                    color: Color(
+                                      0xFF339BFF,
+                                    ),
+                                    fontSize: 20,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  if (services.isEmpty)
-                    buildServiceItem('No service found', 0)
-                  else
-                    ...services.map((service) {
-                      final price =
-                          double.tryParse(service['price'].toString()) ?? 0;
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.fromLTRB(
+                      16,
+                      12,
+                      16,
+                      16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        top: BorderSide(
+                          color:
+                          Colors.grey.shade200,
+                        ),
+                      ),
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child:
+                      ElevatedButton.icon(
+                        style: ElevatedButton
+                            .styleFrom(
+                          backgroundColor:
+                          const Color(
+                            0xFF339BFF,
+                          ),
+                          foregroundColor:
+                          Colors.white,
+                          padding:
+                          const EdgeInsets
+                              .symmetric(
+                            vertical: 13,
+                          ),
+                          shape:
+                          RoundedRectangleBorder(
+                            borderRadius:
+                            BorderRadius
+                                .circular(
+                              14,
+                            ),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(
+                            dialogContext,
+                          );
 
-                      return buildServiceItem(
-                        service['service_name'] ?? '',
-                        price,
-                      );
-                    }),
-                  const Divider(height: 24),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      'Estimated Total: RM ${total.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                          if (openedFromNotification) {
+                            clearBookingHighlight();
+                          }
+                        },
+                        icon: const Icon(
+                          Icons.check_rounded,
+                        ),
+                        label: const Text(
+                          'Done',
+                          style: TextStyle(
+                            fontWeight:
+                            FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -998,52 +1384,191 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
               ),
             ),
           ),
-          actions: [
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF339BFF),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: const Text('Close'),
-              ),
-            ),
-          ],
         );
       },
     );
   }
 
-  Widget buildServiceItem(String name, double price) {
+  Widget buildBookingDialogSection({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      width: double.infinity,
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius:
+        BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color:
+            Colors.black.withOpacity(0.035),
+            blurRadius: 8,
+            offset:
+            const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color:
+                  const Color(0xFFEAF4FF),
+                  borderRadius:
+                  BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  color:
+                  const Color(0xFF339BFF),
+                  size: 19,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color:
+                    Color(0xFF1F2937),
+                    fontSize: 15,
+                    fontWeight:
+                    FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 13),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget buildBookingDialogRow({
+    required String title,
+    required String value,
+    bool showDivider = true,
+  }) {
+    final displayValue =
+    value.trim().isEmpty
+        ? 'Not Provided'
+        : value.trim();
+
+    return Column(
+      children: [
+        Row(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 4,
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12,
+                  fontWeight:
+                  FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 6,
+              child: Text(
+                displayValue,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  color:
+                  Color(0xFF1F2937),
+                  fontSize: 12,
+                  fontWeight:
+                  FontWeight.bold,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (showDivider) ...[
+          const SizedBox(height: 10),
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+
+  Widget buildServiceItem(
+      String name,
+      double price,
+      ) {
+    return Container(
+      margin:
+      const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F7FA),
-        borderRadius: BorderRadius.circular(14),
+        color: const Color(0xFFF7F9FC),
+        borderRadius:
+        BorderRadius.circular(14),
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.build,
-            color: Color(0xFF339BFF),
-            size: 18,
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color:
+              const Color(0xFFEAF4FF),
+              borderRadius:
+              BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.build_rounded,
+              color:
+              Color(0xFF339BFF),
+              size: 17,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               name,
-              style: const TextStyle(fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                color:
+                Color(0xFF1F2937),
+                fontSize: 12.5,
+                fontWeight:
+                FontWeight.w600,
+              ),
             ),
           ),
           Text(
-            price == 0 ? 'RM 0.00' : 'RM ${price.toStringAsFixed(2)}',
-            style: const TextStyle(fontWeight: FontWeight.bold),
+            'RM ${price.toStringAsFixed(2)}',
+            style: const TextStyle(
+              color:
+              Color(0xFF339BFF),
+              fontSize: 12.5,
+              fontWeight:
+              FontWeight.bold,
+            ),
           ),
         ],
       ),
@@ -1130,6 +1655,7 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
 
             setState(() {
               selectedFilter = title;
+              highlightedBookingId = null;
             });
           },
           child: FittedBox(
@@ -1250,26 +1776,68 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
     );
   }
 
-  Widget buildBookingCard(Map<String, dynamic> booking) {
-    final status = booking['status'] ?? 'Booked';
+  Widget buildBookingCard(
+      Map<String, dynamic> booking,
+      ) {
+    final bookingId =
+        booking['booking_id']
+            ?.toString()
+            .trim() ??
+            '';
 
-    final customerName = booking['customers']?['name'] ?? 'Not Provided';
+    final isHighlighted =
+        bookingId.isNotEmpty &&
+            highlightedBookingId ==
+                bookingId;
+
+    final cardKey =
+    bookingCardKeys.putIfAbsent(
+      bookingId,
+          () => GlobalKey(),
+    );
+
+    final status =
+        booking['status'] ?? 'Booked';
+
+    final customerName =
+        booking['customers']?['name'] ??
+            'Not Provided';
     final vehiclePlate = booking['vehicles']?['plate_number'] ?? '';
     final vehicleModel = booking['vehicles']?['car_model'] ?? '';
     final date = formatDate(booking['appointment_date'].toString());
     final services = getServices(booking);
     final rejectionReason = booking['rejection_reason'];
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+    return AnimatedContainer(
+      key: cardKey,
+      duration:
+      const Duration(milliseconds: 260),
+      margin:
+      const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        color: isHighlighted
+            ? const Color(0xFFF5FAFF)
+            : Colors.white,
+        borderRadius:
+        BorderRadius.circular(22),
+        border: Border.all(
+          color: isHighlighted
+              ? const Color(0xFF339BFF)
+              : const Color(0xFF339BFF)
+              .withOpacity(0.08),
+          width: isHighlighted ? 2.2 : 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.07),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
+            color: isHighlighted
+                ? const Color(0xFF339BFF)
+                .withOpacity(0.18)
+                : Colors.black
+                .withOpacity(0.07),
+            blurRadius:
+            isHighlighted ? 19 : 14,
+            offset:
+            const Offset(0, 6),
           ),
         ],
       ),
@@ -1283,6 +1851,53 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (isHighlighted) ...[
+                Container(
+                  width: double.infinity,
+                  margin:
+                  const EdgeInsets.only(
+                    bottom: 13,
+                  ),
+                  padding:
+                  const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color:
+                    const Color(0xFFEAF4FF),
+                    borderRadius:
+                    BorderRadius.circular(
+                      14,
+                    ),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons
+                            .notifications_active_rounded,
+                        color:
+                        Color(0xFF339BFF),
+                        size: 18,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'BOOKING FROM NOTIFICATION',
+                          style: TextStyle(
+                            color:
+                            Color(0xFF339BFF),
+                            fontSize: 10.5,
+                            fontWeight:
+                            FontWeight.bold,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               Row(
                 children: [
                   const CircleAvatar(
@@ -1417,84 +2032,123 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
 
               const SizedBox(height: 16),
 
-              if (status == 'Booked')
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.close, size: 18),
-                        label: const Text('Reject'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
-                          side: const BorderSide(color: Colors.red),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+              if (status == 'Booked' ||
+                  status == 'Approved') ...[
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(
+                    bottom: 11,
+                  ),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEAF4FF),
+                    borderRadius:
+                    BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFF339BFF)
+                          .withOpacity(0.16),
+                    ),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.event_available_outlined,
+                        color: Color(0xFF339BFF),
+                        size: 20,
+                      ),
+                      SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          'Booking confirmed. Confirm arrival only when the vehicle reaches the workshop.',
+                          style: TextStyle(
+                            color: Color(0xFF1F2937),
+                            fontSize: 11.5,
+                            height: 1.35,
+                            fontWeight:
+                            FontWeight.w600,
                           ),
                         ),
-                        onPressed: () {
-                          showRejectReasonDialog(booking);
-                        },
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.check, size: 18),
-                        label: const Text('Approve'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        onPressed: () {
-                          confirmApproveAppointment(booking);
-                        },
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-
-              if (status == 'Rejected')
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    icon: const Icon(Icons.check_circle_outline, size: 18),
-                    label: const Text('Approve Again'),
+                    icon: isProcessingArrival
+                        ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child:
+                      CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                        : const Icon(
+                      Icons.directions_car,
+                      size: 18,
+                    ),
+                    label: Text(
+                      isProcessingArrival
+                          ? 'Updating Arrival...'
+                          : 'Customer Arrived',
+                    ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                      backgroundColor:
+                      Colors.orange,
+                      foregroundColor:
+                      Colors.white,
+                      padding:
+                      const EdgeInsets.symmetric(
+                        vertical: 12,
+                      ),
+                      shape:
+                      RoundedRectangleBorder(
+                        borderRadius:
+                        BorderRadius.circular(14),
                       ),
                     ),
-                    onPressed: () {
-                      confirmApproveAppointment(booking);
+                    onPressed: isProcessingArrival
+                        ? null
+                        : () {
+                      confirmCustomerArrived(
+                        booking,
+                      );
                     },
                   ),
                 ),
+              ],
 
-              if (status == 'Approved')
-                SizedBox(
+              if (status == 'Rejected')
+                Container(
                   width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.directions_car, size: 18),
-                    label: const Text('Customer Arrived'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius:
+                    BorderRadius.circular(14),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: Colors.red,
+                        size: 19,
                       ),
-                    ),
-                    onPressed: () {
-                      confirmCustomerArrived(booking);
-                    },
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'This is an old rejected booking record. Approval actions have been removed.',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontSize: 11.5,
+                            fontWeight:
+                            FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
 
@@ -1575,12 +2229,46 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'Manage appointments and booking status',
+            'Manage confirmed bookings and vehicle arrivals',
             style: TextStyle(
               color: Colors.white70,
               fontSize: 13,
             ),
           ),
+          const SizedBox(height: 12),
+
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.16),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Row(
+              children: [
+                Icon(
+                  Icons.route_outlined,
+                  color: Colors.white,
+                  size: 19,
+                ),
+                SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    'Booked → Customer Arrived → Pending Service → Completed',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           const SizedBox(height: 14),
 
           Row(
@@ -1620,9 +2308,11 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
               ],
             ),
             child: TextField(
+              controller: searchController,
               onChanged: (value) {
                 setState(() {
                   searchText = value;
+                  highlightedBookingId = null;
                 });
               },
               decoration: const InputDecoration(
@@ -1768,10 +2458,89 @@ class _AdminBookingsPageState extends State<AdminBookingsPage> {
 
             if (displayBookings.isEmpty)
               SliverFillRemaining(
+                hasScrollBody: false,
                 child: Center(
-                  child: Text(
-                    'No $selectedFilter bookings.',
-                    style: const TextStyle(fontSize: 16),
+                  child: Container(
+                    margin:
+                    const EdgeInsets.all(24),
+                    padding:
+                    const EdgeInsets
+                        .symmetric(
+                      horizontal: 26,
+                      vertical: 34,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius:
+                      BorderRadius.circular(
+                        22,
+                      ),
+                      border: Border.all(
+                        color:
+                        const Color(
+                          0xFF339BFF,
+                        ).withOpacity(0.10),
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize:
+                      MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 70,
+                          height: 70,
+                          decoration:
+                          BoxDecoration(
+                            color: const Color(
+                              0xFFEAF4FF,
+                            ),
+                            borderRadius:
+                            BorderRadius
+                                .circular(
+                              23,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons
+                                .event_busy_outlined,
+                            color: Color(
+                              0xFF339BFF,
+                            ),
+                            size: 35,
+                          ),
+                        ),
+                        const SizedBox(
+                          height: 16,
+                        ),
+                        Text(
+                          'No $selectedFilter Bookings',
+                          textAlign:
+                          TextAlign.center,
+                          style:
+                          const TextStyle(
+                            color:
+                            Color(0xFF1F2937),
+                            fontSize: 18,
+                            fontWeight:
+                            FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(
+                          height: 7,
+                        ),
+                        const Text(
+                          'Try another date filter or update the search keyword.',
+                          textAlign:
+                          TextAlign.center,
+                          style: TextStyle(
+                            color:
+                            Colors.black54,
+                            fontSize: 12.5,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               )

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/supabase_service.dart';
 import '../admin/admin_notification_page.dart';
 import '../customer/customer_notification_page.dart';
+import 'notification_navigation_service.dart';
 
 class NotificationBell extends StatefulWidget {
   final bool isAdmin;
@@ -169,11 +170,72 @@ class _NotificationBellState extends State<NotificationBell> {
     return record['customer_id']?.toString() == customerId;
   }
 
+  Future<void> markPopupNotificationAsRead(
+      Map<String, dynamic> record,
+      ) async {
+    if (record['is_read'] == true) return;
+
+    final notificationId =
+    record['notification_id']
+        ?.toString()
+        .trim();
+
+    if (notificationId == null ||
+        notificationId.isEmpty) {
+      return;
+    }
+
+    try {
+      await supabase.rpc(
+        widget.isAdmin
+            ? 'admin_notification_action'
+            : 'customer_notification_action',
+        params: {
+          'p_action': 'mark_read',
+          'p_notification_id':
+          notificationId,
+        },
+      );
+    } catch (error) {
+      debugPrint(
+        'Popup notification mark-read failed: $error',
+      );
+    }
+  }
+
+  Future<void> openPopupNotificationTarget(
+      Map<String, dynamic> record,
+      ) async {
+    ScaffoldMessenger.of(context)
+        .hideCurrentSnackBar();
+
+    await markPopupNotificationAsRead(
+      record,
+    );
+
+    if (!mounted) return;
+
+    final opened =
+    await NotificationNavigationService
+        .openRelatedPage(
+      context,
+      notification: record,
+      isAdmin: widget.isAdmin,
+    );
+
+    if (!mounted) return;
+
+    if (!opened) {
+      await openNotificationPage();
+    } else {
+      await loadUnreadCount();
+    }
+  }
+
   void showInAppNotification(Map<String, dynamic> record) {
     if (!mounted) return;
 
     final title = record['title']?.toString() ?? 'New Notification';
-    final message = record['message']?.toString() ?? '';
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -187,8 +249,9 @@ class _NotificationBellState extends State<NotificationBell> {
         ),
         content: InkWell(
           onTap: () {
-            ScaffoldMessenger.of(context).hideCurrentSnackBar();
-            openNotificationPage();
+            openPopupNotificationTarget(
+              record,
+            );
           },
           child: Row(
             children: [
@@ -214,18 +277,23 @@ class _NotificationBellState extends State<NotificationBell> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (message.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        message,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.black54,
-                          fontSize: 12,
-                        ),
+                    const SizedBox(height: 3),
+                    Text(
+                      NotificationNavigationService
+                          .canOpen(
+                        notification: record,
+                        isAdmin: widget.isAdmin,
+                      )
+                          ? 'Tap to open the related page'
+                          : 'Tap to view notification details',
+                      maxLines: 1,
+                      overflow:
+                      TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontSize: 12,
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ),

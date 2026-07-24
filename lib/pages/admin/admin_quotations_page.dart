@@ -1203,37 +1203,110 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     );
   }
 
+  IconData getQuotationStatusIcon(String status) {
+    if (status == 'Draft') {
+      return Icons.edit_document;
+    }
+
+    if (status == 'Sent') {
+      return Icons.send_outlined;
+    }
+
+    if (status == 'Confirmed') {
+      return Icons.verified_outlined;
+    }
+
+    if (status == 'Cancelled') {
+      return Icons.cancel_outlined;
+    }
+
+    return Icons.receipt_long_outlined;
+  }
+
   Widget buildStatusButton(String status) {
     final isSelected = selectedStatus == status;
+    final statusColor = getStatusColor(status);
 
     return Expanded(
-      child: GestureDetector(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
         onTap: () {
-          setState(() => selectedStatus = status);
+          if (selectedStatus == status) {
+            return;
+          }
+
+          setState(() {
+            selectedStatus = status;
+          });
         },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          height: 46,
+          duration: const Duration(milliseconds: 220),
+          height: 68,
+          padding: const EdgeInsets.symmetric(
+            horizontal: 7,
+            vertical: 8,
+          ),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF339BFF) : Colors.white,
+            color: isSelected
+                ? statusColor
+                : Colors.white,
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected
+                  ? statusColor
+                  : statusColor.withOpacity(0.18),
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isSelected ? 0.10 : 0.04),
+                color: statusColor.withOpacity(
+                  isSelected ? 0.18 : 0.06,
+                ),
                 blurRadius: 8,
                 offset: const Offset(0, 4),
               ),
             ],
           ),
-          child: Center(
-            child: Text(
-              status,
-              style: TextStyle(
-                color: isSelected ? Colors.white : const Color(0xFF339BFF),
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment:
+                MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    getQuotationStatusIcon(status),
+                    size: 16,
+                    color: isSelected
+                        ? Colors.white
+                        : statusColor,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${getStatusCount(status)}',
+                    style: TextStyle(
+                      color: isSelected
+                          ? Colors.white
+                          : statusColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
-            ),
+              const SizedBox(height: 5),
+              Text(
+                status,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: isSelected
+                      ? Colors.white
+                      : const Color(0xFF1F2937),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1297,16 +1370,16 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     if (outlined) {
       return Expanded(
         child: SizedBox(
-          height: 40,
+          height: 44,
           child: OutlinedButton.icon(
             onPressed: onPressed,
-            icon: Icon(icon, size: 15),
+            icon: Icon(icon, size: 17),
             label: Text(
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                fontSize: 10,
+                fontSize: 11.5,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -1352,24 +1425,145 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     );
   }
 
-  Widget buildQuotationCard(Map<String, dynamic> quotation) {
-    final status = quotation['status'] ?? 'Draft';
-    final isArrived = quotation['is_arrived'] == true;
-    final vehicle = quotation['vehicles'] ?? {};
-    final customer = quotation['customers'] ?? {};
-    final items = quotation['quotation_items'] as List? ?? [];
+  Widget buildQuotationInformationLine({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    final displayValue =
+    value.trim().isEmpty ? 'Not Provided' : value.trim();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: const Color(0xFF339BFF),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 2,
+          child: Text(
+            displayValue,
+            textAlign: TextAlign.right,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF1F2937),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget buildViewQuotationButton(
+      Map<String, dynamic> quotation,
+      ) {
+    return SizedBox(
+      width: double.infinity,
+      height: 44,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF339BFF),
+          side: const BorderSide(
+            color: Color(0xFF339BFF),
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        onPressed: () {
+          showQuotationDetailDialog(quotation);
+        },
+        icon: const Icon(
+          Icons.visibility_outlined,
+          size: 18,
+        ),
+        label: const Text(
+          'View Quotation Details',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget buildQuotationCard(
+      Map<String, dynamic> quotation,
+      ) {
+    final status =
+        quotation['status']?.toString() ??
+            'Draft';
+
+    final isArrived =
+        quotation['is_arrived'] == true;
+
+    final vehicle =
+        quotation['vehicles'] ??
+            <String, dynamic>{};
+
+    final customer =
+        quotation['customers'] ??
+            <String, dynamic>{};
+
+    final items =
+        quotation['quotation_items'] as List? ??
+            [];
+
     final total =
-        double.tryParse(quotation['total'].toString()) ?? calculateTotal(items);
+        double.tryParse(
+          quotation['total'].toString(),
+        ) ??
+            calculateTotal(items);
+
+    final plate =
+        vehicle['plate_number']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final model =
+        vehicle['car_model']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final customerName =
+    displayCustomer(customer['name']);
+
+    final statusColor =
+    getStatusColor(status);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsets.only(
+        bottom: 16,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: statusColor.withOpacity(0.14),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.07),
-            blurRadius: 12,
+            color: statusColor.withOpacity(0.07),
+            blurRadius: 13,
             offset: const Offset(0, 5),
           ),
         ],
@@ -1382,94 +1576,205 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
+            crossAxisAlignment:
+            CrossAxisAlignment.start,
             children: [
               Row(
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 children: [
-                  const CircleAvatar(
-                    radius: 27,
-                    backgroundColor: Color(0xFFD7E5FA),
-                    child: Icon(
+                  Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD7E5FA),
+                      borderRadius:
+                      BorderRadius.circular(17),
+                    ),
+                    child: const Icon(
                       Icons.receipt_long,
                       color: Color(0xFF339BFF),
                       size: 28,
                     ),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 13),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment:
+                      CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '${vehicle['plate_number'] ?? ''} • ${vehicle['car_model'] ?? ''}',
+                          plate.isEmpty
+                              ? 'NO PLATE NUMBER'
+                              : plate,
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          overflow:
+                          TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 16,
+                            color: Color(0xFF1F2937),
+                            fontSize: 19,
                             fontWeight: FontWeight.bold,
+                            letterSpacing: 0.35,
                           ),
                         ),
-                        const SizedBox(height: 5),
+                        const SizedBox(height: 4),
                         Text(
-                          'Customer: ${displayCustomer(customer['name'])}',
+                          model.isEmpty
+                              ? 'Car model not provided'
+                              : model,
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.black54),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Items: ${items.length}',
-                          style: const TextStyle(color: Colors.black54),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Arrival: ${isArrived ? 'Arrived' : 'Not Arrived'}',
-                          style: TextStyle(
-                            color: isArrived ? Colors.green : Colors.orange,
+                          overflow:
+                          TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.black54,
+                            fontSize: 13,
                             fontWeight: FontWeight.w600,
-                            fontSize: 12,
                           ),
                         ),
-                        const SizedBox(height: 8),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                      getStatusBackgroundColor(
+                        status,
+                      ),
+                      borderRadius:
+                      BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize:
+                      MainAxisSize.min,
+                      children: [
+                        Icon(
+                          getQuotationStatusIcon(status),
+                          color: statusColor,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 5),
                         Text(
-                          'RM ${total.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            color: Color(0xFF339BFF),
+                          status,
+                          style: TextStyle(
+                            color: statusColor,
+                            fontSize: 10.5,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: getStatusBackgroundColor(status),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      status,
-                      style: TextStyle(
-                        color: getStatusColor(status),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ),
                 ],
               ),
+
+              const SizedBox(height: 14),
+
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(13),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7F9FC),
+                  borderRadius:
+                  BorderRadius.circular(16),
+                ),
+                child: Column(
+                  children: [
+                    buildQuotationInformationLine(
+                      icon: Icons.person_outline,
+                      title: 'Customer',
+                      value: customerName,
+                    ),
+                    const SizedBox(height: 11),
+                    const Divider(height: 1),
+                    const SizedBox(height: 11),
+                    buildQuotationInformationLine(
+                      icon: Icons.inventory_2_outlined,
+                      title: 'Quotation Items',
+                      value: '${items.length} item(s)',
+                    ),
+                    const SizedBox(height: 11),
+                    const Divider(height: 1),
+                    const SizedBox(height: 11),
+                    buildQuotationInformationLine(
+                      icon: isArrived
+                          ? Icons.check_circle_outline
+                          : Icons.schedule,
+                      title: 'Vehicle Arrival',
+                      value: isArrived
+                          ? 'Arrived'
+                          : 'Not Arrived',
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 13),
+
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 13,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF4FF),
+                  borderRadius:
+                  BorderRadius.circular(15),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.payments_outlined,
+                      color: Color(0xFF339BFF),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 9),
+                    const Expanded(
+                      child: Text(
+                        'Quotation Total',
+                        style: TextStyle(
+                          color: Color(0xFF1F2937),
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      'RM ${total.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        color: Color(0xFF339BFF),
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              buildViewQuotationButton(
+                quotation,
+              ),
+
               if (status == 'Draft') ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
                 Row(
                   children: [
                     buildCardActionButton(
-                      icon: Icons.edit,
+                      icon: Icons.edit_outlined,
                       label: 'Edit',
                       outlined: true,
                       onPressed: () {
-                        showEditQuotationDialog(quotation);
+                        showEditQuotationDialog(
+                          quotation,
+                        );
                       },
                     ),
                     const SizedBox(width: 8),
@@ -1479,31 +1784,17 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
                       outlined: true,
                       foregroundColor: Colors.red,
                       onPressed: () {
-                        showDeleteQuotationDialog(quotation['quotation_id']);
+                        showDeleteQuotationDialog(
+                          quotation['quotation_id'],
+                        );
                       },
                     ),
                     const SizedBox(width: 8),
                     buildCardActionButton(
-                      icon: Icons.send,
+                      icon: Icons.send_outlined,
                       label: 'Send',
                       onPressed: () {
-                        showSendQuotationDialog(quotation['quotation_id']);
-                      },
-                    ),
-                  ],
-                ),
-              ],
-              if (status == 'Sent') ...[
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    buildCardActionButton(
-                      icon: Icons.cancel_outlined,
-                      label: 'Cancel Quotation',
-                      outlined: true,
-                      foregroundColor: Colors.red,
-                      onPressed: () {
-                        showCancelQuotationDialog(
+                        showSendQuotationDialog(
                           quotation['quotation_id'],
                         );
                       },
@@ -1512,31 +1803,74 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
                 ),
               ],
 
-              if (status == 'Confirmed') ...[
-                const SizedBox(height: 14),
+              if (status == 'Sent') ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: OutlinedButton.icon(
+                    style:
+                    OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(
+                        color: Colors.red,
+                      ),
+                      shape:
+                      RoundedRectangleBorder(
+                        borderRadius:
+                        BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: () {
+                      showCancelQuotationDialog(
+                        quotation['quotation_id'],
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.cancel_outlined,
+                      size: 18,
+                    ),
+                    label: const Text(
+                      'Cancel Quotation',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
 
+              if (status == 'Confirmed') ...[
+                const SizedBox(height: 10),
                 if (!isArrived)
                   SizedBox(
                     width: double.infinity,
-                    height: 42,
+                    height: 44,
                     child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
+                      style:
+                      ElevatedButton.styleFrom(
+                        backgroundColor:
+                        Colors.green,
+                        foregroundColor:
+                        Colors.white,
                         elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(13),
+                        shape:
+                        RoundedRectangleBorder(
+                          borderRadius:
+                          BorderRadius.circular(14),
                         ),
                       ),
                       onPressed: () {
-                        showMarkArrivedDialog(quotation);
+                        showMarkArrivedDialog(
+                          quotation,
+                        );
                       },
                       icon: const Icon(
                         Icons.login,
                         size: 18,
                       ),
                       label: const Text(
-                        'Mark Arrived',
+                        'Mark Vehicle Arrived',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                         ),
@@ -1546,19 +1880,23 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
                 else
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
+                    padding:
+                    const EdgeInsets.symmetric(
                       horizontal: 14,
-                      vertical: 11,
+                      vertical: 12,
                     ),
                     decoration: BoxDecoration(
                       color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(13),
+                      borderRadius:
+                      BorderRadius.circular(14),
                       border: Border.all(
-                        color: Colors.green.shade200,
+                        color:
+                        Colors.green.shade200,
                       ),
                     ),
                     child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisAlignment:
+                      MainAxisAlignment.center,
                       children: [
                         Icon(
                           Icons.check_circle,
@@ -1566,12 +1904,16 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
                           size: 18,
                         ),
                         SizedBox(width: 7),
-                        Text(
-                          'Arrived — Added to Pending Services',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
+                        Flexible(
+                          child: Text(
+                            'Arrived — Added to Pending Services',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.green,
+                              fontWeight:
+                              FontWeight.bold,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                       ],
@@ -1613,31 +1955,200 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     );
   }
 
-  Widget buildDetailRow(String title, String value) {
+  Widget buildQuotationDialogSection({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.035),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF4FF),
+                  borderRadius:
+                  BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  size: 19,
+                  color: const Color(0xFF339BFF),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF1F2937),
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget buildQuotationDialogInformationRow({
+    required IconData icon,
+    required String title,
+    required String value,
+    bool showDivider = true,
+  }) {
+    final displayValue =
+    value.trim().isEmpty ? 'Not Provided' : value.trim();
+
+    return Column(
+      children: [
+        Row(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: Colors.black45,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 4,
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 6,
+              child: Text(
+                displayValue,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  color: Color(0xFF1F2937),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.bold,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (showDivider) ...[
+          const SizedBox(height: 11),
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+          const SizedBox(height: 11),
+        ],
+      ],
+    );
+  }
+
+  Widget buildQuotationDialogItem(
+      Map<dynamic, dynamic> item,
+      ) {
+    final quantity =
+        int.tryParse(
+          item['quantity']?.toString() ?? '',
+        ) ??
+            1;
+
+    final price =
+        double.tryParse(
+          item['price']?.toString() ?? '',
+        ) ??
+            0;
+
+    final subtotal = quantity * price;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 9),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F7FA),
+        color: const Color(0xFFF7F9FC),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: Colors.black54,
-                fontWeight: FontWeight.w500,
-              ),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEAF4FF),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: const Icon(
+              Icons.build_outlined,
+              color: Color(0xFF339BFF),
+              size: 19,
             ),
           ),
+          const SizedBox(width: 11),
           Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item['item_name']?.toString() ??
+                      'Quotation Item',
+                  style: const TextStyle(
+                    color: Color(0xFF1F2937),
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Qty $quantity  ×  RM ${price.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'RM ${subtotal.toStringAsFixed(2)}',
+            style: const TextStyle(
+              color: Color(0xFF339BFF),
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ],
@@ -1645,112 +2156,414 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     );
   }
 
-  void showQuotationDetailDialog(Map<String, dynamic> quotation) {
-    final vehicle = quotation['vehicles'] ?? {};
-    final customer = quotation['customers'] ?? {};
-    final status = quotation['status'] ?? 'Draft';
-    final isArrived = quotation['is_arrived'] == true;
-    final items = quotation['quotation_items'] as List? ?? [];
+  void showQuotationDetailDialog(
+      Map<String, dynamic> quotation,
+      ) {
+    final vehicle =
+        quotation['vehicles'] ??
+            <String, dynamic>{};
+
+    final customer =
+        quotation['customers'] ??
+            <String, dynamic>{};
+
+    final status =
+        quotation['status']?.toString() ??
+            'Draft';
+
+    final isArrived =
+        quotation['is_arrived'] == true;
+
+    final items =
+        quotation['quotation_items'] as List? ??
+            [];
+
     final total =
-        double.tryParse(quotation['total'].toString()) ?? calculateTotal(items);
+        double.tryParse(
+          quotation['total'].toString(),
+        ) ??
+            calculateTotal(items);
+
+    final plate =
+        vehicle['plate_number']
+            ?.toString()
+            .trim() ??
+            '';
+
+    final model =
+        vehicle['car_model']
+            ?.toString()
+            .trim() ??
+            '';
 
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 35),
-          title: const Text(
-            'Quotation Details',
-            style: TextStyle(fontWeight: FontWeight.bold),
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
           ),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
+            borderRadius:
+            BorderRadius.circular(26),
           ),
-          content: SizedBox(
-            width: 430,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  buildDetailRow('Customer', displayCustomer(customer['name'])),
-                  buildDetailRow('Phone', displayCustomer(customer['phone'])),
-                  buildDetailRow(
-                    'Vehicle',
-                    '${vehicle['plate_number'] ?? ''} • ${vehicle['car_model'] ?? ''}',
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 470,
+              maxHeight:
+              MediaQuery.of(dialogContext)
+                  .size
+                  .height *
+                  0.88,
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding:
+                  const EdgeInsets.fromLTRB(
+                    18,
+                    16,
+                    10,
+                    16,
                   ),
-                  buildDetailRow(
-                    'Problem',
-                    quotation['problem_description'] ?? 'No description',
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Color(0xFF248CF2),
+                        Color(0xFF63B3FF),
+                      ],
+                    ),
                   ),
-                  buildDetailRow('Status', status),
-                  buildDetailRow(
-                    'Arrival',
-                    isArrived ? 'Arrived' : 'Not Arrived',
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Quotation Items',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  const SizedBox(height: 10),
-                  if (items.isEmpty)
-                    const Text('No items found.')
-                  else
-                    ...items.map((item) {
-                      final qty =
-                          int.tryParse(item['quantity'].toString()) ?? 1;
-                      final price =
-                          double.tryParse(item['price'].toString()) ?? 0;
-                      final subtotal = qty * price;
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 50,
+                        height: 50,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF5F7FA),
-                          borderRadius: BorderRadius.circular(14),
+                          color: Colors.white
+                              .withOpacity(0.18),
+                          borderRadius:
+                          BorderRadius.circular(15),
                         ),
-                        child: Row(
+                        child: const Icon(
+                          Icons.receipt_long,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                      ),
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: Text(
-                                '${item['item_name']}\nQty: $qty x RM ${price.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
+                            Text(
+                              plate.isEmpty
+                                  ? 'Quotation Details'
+                                  : plate,
+                              maxLines: 1,
+                              overflow:
+                              TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight:
+                                FontWeight.bold,
                               ),
                             ),
+                            const SizedBox(height: 3),
                             Text(
-                              'RM ${subtotal.toStringAsFixed(2)}',
+                              model.isEmpty
+                                  ? 'Quotation Details'
+                                  : model,
+                              maxLines: 1,
+                              overflow:
+                              TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                                color: Colors.white70,
+                                fontSize: 12.5,
+                                fontWeight:
+                                FontWeight.w600,
                               ),
                             ),
                           ],
                         ),
-                      );
-                    }),
-                  const Divider(height: 24),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      'Total: RM ${total.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
+                      ),
+                      Container(
+                        padding:
+                        const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white
+                              .withOpacity(0.18),
+                          borderRadius:
+                          BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          status,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10.5,
+                            fontWeight:
+                            FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () {
+                          Navigator.pop(
+                            dialogContext,
+                          );
+                        },
+                        icon: const Icon(
+                          Icons.close,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding:
+                    const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        buildQuotationDialogSection(
+                          icon: Icons.person_outline,
+                          title:
+                          'Customer & Vehicle',
+                          children: [
+                            buildQuotationDialogInformationRow(
+                              icon: Icons.person,
+                              title: 'Customer',
+                              value: displayCustomer(
+                                customer['name'],
+                              ),
+                            ),
+                            buildQuotationDialogInformationRow(
+                              icon:
+                              Icons.phone_outlined,
+                              title: 'Phone',
+                              value: displayCustomer(
+                                customer['phone'],
+                              ),
+                            ),
+                            buildQuotationDialogInformationRow(
+                              icon:
+                              Icons.directions_car,
+                              title: 'Vehicle',
+                              value:
+                              '${vehicle['plate_number'] ?? ''} • ${vehicle['car_model'] ?? ''}',
+                              showDivider: false,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 13),
+                        buildQuotationDialogSection(
+                          icon:
+                          Icons.description_outlined,
+                          title:
+                          'Quotation Information',
+                          children: [
+                            buildQuotationDialogInformationRow(
+                              icon:
+                              Icons.report_problem_outlined,
+                              title: 'Problem',
+                              value: quotation[
+                              'problem_description']
+                                  ?.toString() ??
+                                  'No description',
+                            ),
+                            buildQuotationDialogInformationRow(
+                              icon:
+                              getQuotationStatusIcon(
+                                status,
+                              ),
+                              title: 'Status',
+                              value: status,
+                            ),
+                            buildQuotationDialogInformationRow(
+                              icon: isArrived
+                                  ? Icons
+                                  .check_circle_outline
+                                  : Icons.schedule,
+                              title: 'Arrival',
+                              value: isArrived
+                                  ? 'Arrived'
+                                  : 'Not Arrived',
+                              showDivider: false,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 13),
+                        buildQuotationDialogSection(
+                          icon:
+                          Icons.inventory_2_outlined,
+                          title: 'Quotation Items',
+                          children: [
+                            if (items.isEmpty)
+                              Container(
+                                width:
+                                double.infinity,
+                                padding:
+                                const EdgeInsets.all(
+                                  13,
+                                ),
+                                decoration:
+                                BoxDecoration(
+                                  color:
+                                  Colors.grey.shade100,
+                                  borderRadius:
+                                  BorderRadius.circular(
+                                    14,
+                                  ),
+                                ),
+                                child: const Text(
+                                  'No quotation items found.',
+                                  textAlign:
+                                  TextAlign.center,
+                                  style: TextStyle(
+                                    color:
+                                    Colors.black54,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                              )
+                            else
+                              ...items.map(
+                                    (item) =>
+                                    buildQuotationDialogItem(
+                                      item as Map<
+                                          dynamic,
+                                          dynamic>,
+                                    ),
+                              ),
+                            const SizedBox(height: 4),
+                            Container(
+                              width: double.infinity,
+                              padding:
+                              const EdgeInsets
+                                  .symmetric(
+                                horizontal: 14,
+                                vertical: 13,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(
+                                  0xFFEAF4FF,
+                                ),
+                                borderRadius:
+                                BorderRadius.circular(
+                                  14,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Quotation Total',
+                                      style: TextStyle(
+                                        color: Color(
+                                          0xFF1F2937,
+                                        ),
+                                        fontSize: 13,
+                                        fontWeight:
+                                        FontWeight
+                                            .bold,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    'RM ${total.toStringAsFixed(2)}',
+                                    style:
+                                    const TextStyle(
+                                      color: Color(
+                                        0xFF339BFF,
+                                      ),
+                                      fontSize: 17,
+                                      fontWeight:
+                                      FontWeight
+                                          .bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  width: double.infinity,
+                  padding:
+                  const EdgeInsets.fromLTRB(
+                    16,
+                    12,
+                    16,
+                    16,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      top: BorderSide(
+                        color:
+                        Colors.grey.shade200,
                       ),
                     ),
                   ),
-                ],
-              ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style:
+                      ElevatedButton.styleFrom(
+                        backgroundColor:
+                        const Color(
+                          0xFF339BFF,
+                        ),
+                        foregroundColor:
+                        Colors.white,
+                        padding:
+                        const EdgeInsets
+                            .symmetric(
+                          vertical: 13,
+                        ),
+                        shape:
+                        RoundedRectangleBorder(
+                          borderRadius:
+                          BorderRadius.circular(
+                            14,
+                          ),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(
+                          dialogContext,
+                        );
+                      },
+                      icon:
+                      const Icon(Icons.check),
+                      label: const Text(
+                        'Done',
+                        style: TextStyle(
+                          fontWeight:
+                          FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
         );
       },
     );
@@ -2161,7 +2974,7 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
                                     style: TextStyle(
                                       color: Color(0xFF339BFF),
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 10,
+                                      fontSize: 11.5,
                                     ),
                                   ),
                                   onTap: () {
@@ -2770,7 +3583,7 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFD7E5FA),
       appBar: AppBar(
-        title: const Text('Quotation Management'),
+        title: const Text('Quotations'),
         centerTitle: true,
         backgroundColor: const Color(0xFF339BFF),
         foregroundColor: Colors.white,
@@ -2799,120 +3612,221 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
       ),
       body: RefreshIndicator(
         onRefresh: () => loadData(),
-        child: CustomScrollView(
+        child: ListView(
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF339BFF),
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(26),
-                    bottomRight: Radius.circular(26),
+          padding: EdgeInsets.zero,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                20,
+              ),
+              decoration: const BoxDecoration(
+                color: Color(0xFF339BFF),
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(26),
+                  bottomRight: Radius.circular(26),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Quotation Records',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Create, edit, send and manage customer quotations',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      buildSummaryCard(
+                        icon: Icons.edit_document,
+                        title: 'Draft',
+                        value: '${getStatusCount('Draft')}',
+                      ),
+                      const SizedBox(width: 12),
+                      buildSummaryCard(
+                        icon: Icons.send,
+                        title: 'Sent',
+                        value: '${getStatusCount('Sent')}',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    onChanged: (value) {
+                      setState(() {
+                        searchText = value;
+                      });
+                    },
+                    decoration: InputDecoration(
+                      hintText:
+                      'Search by plate, model, or customer',
+                      prefixIcon: const Icon(Icons.search),
+                      filled: true,
+                      fillColor: Colors.white,
+                      contentPadding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius:
+                        BorderRadius.circular(18),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+              ),
+              child: Row(
+                children: [
+                  buildStatusButton('Draft'),
+                  const SizedBox(width: 8),
+                  buildStatusButton('Sent'),
+                  const SizedBox(width: 8),
+                  buildStatusButton('Confirmed'),
+                  const SizedBox(width: 8),
+                  buildStatusButton('Cancelled'),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 18),
+
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '$selectedStatus Quotations',
+                      style: const TextStyle(
+                        color: Color(0xFF1F2937),
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius:
+                      BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '${displayQuotations.length} record(s)',
+                      style: const TextStyle(
+                        color: Color(0xFF339BFF),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            if (isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(
+                  vertical: 90,
+                ),
+                child: Center(
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (displayQuotations.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 70,
                 ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Quotation Records',
-                      style: TextStyle(
+                    Container(
+                      width: 76,
+                      height: 76,
+                      decoration: BoxDecoration(
                         color: Colors.white,
-                        fontSize: 22,
+                        borderRadius:
+                        BorderRadius.circular(24),
+                      ),
+                      child: Icon(
+                        getQuotationStatusIcon(
+                          selectedStatus,
+                        ),
+                        color: getStatusColor(
+                          selectedStatus,
+                        ),
+                        size: 36,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No $selectedStatus quotations found.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF1F2937),
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Create, edit, send and manage customer quotations',
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        buildSummaryCard(
-                          icon: Icons.edit_document,
-                          title: 'Draft',
-                          value: '${getStatusCount('Draft')}',
-                        ),
-                        const SizedBox(width: 12),
-                        buildSummaryCard(
-                          icon: Icons.send,
-                          title: 'Sent',
-                          value: '${getStatusCount('Sent')}',
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      onChanged: (value) {
-                        setState(() => searchText = value);
-                      },
-                      decoration: InputDecoration(
-                        hintText: 'Search by plate, model, or customer',
-                        prefixIcon: const Icon(Icons.search),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: BorderSide.none,
-                        ),
+                      'Create a quotation or select another status.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.black54,
+                        fontSize: 13,
                       ),
                     ),
                   ],
                 ),
-              ),
-            ),
-
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _QuotationStatusHeaderDelegate(
-                child: Container(
-                  color: const Color(0xFFD7E5FA),
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-                  child: Row(
-                    children: [
-                      buildStatusButton('Draft'),
-                      const SizedBox(width: 8),
-                      buildStatusButton('Sent'),
-                      const SizedBox(width: 8),
-                      buildStatusButton('Confirmed'),
-                      const SizedBox(width: 8),
-                      buildStatusButton('Cancelled'),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            const SliverToBoxAdapter(child: SizedBox(height: 8)),
-
-            if (isLoading)
-              const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (displayQuotations.isEmpty)
-              SliverFillRemaining(
-                child: Center(
-                  child: Text(
-                    'No $selectedStatus quotations found.',
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                ),
               )
             else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                      return buildQuotationCard(displayQuotations[index]);
-                    },
-                    childCount: displayQuotations.length,
-                  ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  110,
+                ),
+                child: Column(
+                  children: displayQuotations
+                      .map(buildQuotationCard)
+                      .toList(),
                 ),
               ),
           ],
@@ -2924,53 +3838,32 @@ class _AdminQuotationsPageState extends State<AdminQuotationsPage> {
         children: [
           if (showBackToTop)
             FloatingActionButton.small(
-              heroTag: 'customerBackToTop',
-              backgroundColor: const Color(0xFF339BFF),
+              heroTag: 'quotationBackToTop',
+              backgroundColor:
+              const Color(0xFF339BFF),
               foregroundColor: Colors.white,
               elevation: 4,
               onPressed: scrollToTop,
-              child: const Icon(Icons.keyboard_arrow_up),
+              child: const Icon(
+                Icons.keyboard_arrow_up,
+              ),
             ),
-          if (showBackToTop) const SizedBox(height: 12),
+          if (showBackToTop)
+            const SizedBox(height: 12),
           FloatingActionButton.extended(
             heroTag: 'createQuotation',
-            backgroundColor: const Color(0xFF339BFF),
+            backgroundColor:
+            const Color(0xFF339BFF),
             foregroundColor: Colors.white,
             onPressed: showCreateQuotationDialog,
             icon: const Icon(Icons.add),
-            label: const Text('Create Quotation'),
+            label: const Text(
+              'Create Quotation',
+            ),
           ),
         ],
       ),
     );
-  }
-}
-
-class _QuotationStatusHeaderDelegate extends SliverPersistentHeaderDelegate {
-  final Widget child;
-
-  _QuotationStatusHeaderDelegate({
-    required this.child,
-  });
-
-  @override
-  double get minExtent => 70;
-
-  @override
-  double get maxExtent => 70;
-
-  @override
-  Widget build(
-      BuildContext context,
-      double shrinkOffset,
-      bool overlapsContent,
-      ) {
-    return child;
-  }
-
-  @override
-  bool shouldRebuild(covariant _QuotationStatusHeaderDelegate oldDelegate) {
-    return true;
   }
 }
 
